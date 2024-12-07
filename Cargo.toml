@@ -1,0 +1,9 @@
+[package]
+name = "ruches"
+version = "0.1.0"
+edition = "2024"
+authors = ["Milan Garnier"]
+
+[dependencies]
+
+static_assertions = "1.1.0"

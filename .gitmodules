@@ -1,0 +1,3 @@
+[submodule "src/position"]
+	path = src/position
+	url = git@gitlab.com:ruches-chess/ruches-board-handling.git
