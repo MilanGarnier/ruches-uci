@@ -2,3 +2,5 @@
 *.lock
 /archive
 /.vscode
+*.svg
+*.data

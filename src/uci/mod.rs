@@ -60,7 +60,7 @@ impl UciInterface {
     }
 
     // returns response
-    fn runcommand(&mut self, s: &String) -> bool {
+    pub fn runcommand(&mut self, s: &String) -> bool {
         let mut parsed = s.split_whitespace();
         match parsed.nth(0) {
             None => return self.failed_parsing_behavior("no command provided"),
