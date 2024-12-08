@@ -7,3 +7,6 @@ authors = ["Milan Garnier"]
 [dependencies]
 
 static_assertions = "1.1.0"
+
+futures = "0.3"
+tokio = { version = "1.42", features = ["full"] }
