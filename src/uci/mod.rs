@@ -1,5 +1,5 @@
 use crate::position::Position;
-use std::{io::stdin, sync::Mutex};
+use std::{fmt::format, io::stdin, sync::Mutex};
 
 const BUILD_NAME: &str = env!("CARGO_PKG_NAME");
 const BUILD_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -129,7 +129,8 @@ impl UciInterface {
                     Some("perft") => match parsed.nth(0) {
                         Some(i) => {
                             let i = i.parse::<usize>().expect("Should have been int");
-                            let c = self.position.perft(i, true);
+                            let c = self.position.perft_top(i);
+                            self.respond(&format!(""));
                             self.respond(&format!("Nodes searched : {}", c));
                             self.respond(&format!(""));
                         }

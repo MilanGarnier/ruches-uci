@@ -2,7 +2,6 @@
 
 pub mod eval;
 pub mod position;
-pub mod test;
 mod uci;
 
 #[tokio::main]
