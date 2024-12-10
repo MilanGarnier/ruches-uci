@@ -1,4 +1,4 @@
-use crate::position::Position;
+use crate::position::{movegen::static_attacks::Lookup, Position};
 use std::{fmt::format, io::stdin, sync::Mutex};
 
 const BUILD_NAME: &str = env!("CARGO_PKG_NAME");
@@ -12,19 +12,21 @@ enum State {
     Quit,
 }
 
-pub struct UciInterface {
+pub struct UciInterface<'a> {
     // state will be locked during critical commands
     state: Mutex<State>,
     debug: bool,
     position: Position, // TODO add here internal configuration
+    runtime : &'a Lookup,
 }
 
-impl UciInterface {
-    pub fn create() -> Self {
+impl<'a> UciInterface<'a> {
+    pub fn create(runtime : &'a Lookup ) -> Self {
         Self {
             state: Mutex::new(State::Free),
             debug: true,
             position: Position::startingpos(),
+            runtime : runtime
         }
     }
     // blocking until quit is recieved
@@ -109,7 +111,7 @@ impl UciInterface {
                     match parsed.nth(0) {
                         Some("moves") | Some("move") => {
                             for move_notation in parsed {
-                                match self.position.getmove(move_notation) {
+                                match self.position.getmove(move_notation, &self.runtime) {
                                     Err(())=> {
                                         return self.failed_parsing_behavior(
                                             "position was illegal to begin with",
@@ -120,7 +122,7 @@ impl UciInterface {
                                             "did not manage to play move",
                                         );
                                     }
-                                    Ok(Some(m)) => self.position = self.position.play_pseudolegal(&m),
+                                    Ok(Some(m)) => self.position.stack(&m),
                                 }
                             }
                         }
@@ -134,7 +136,7 @@ impl UciInterface {
                     Some("perft") => match parsed.nth(0) {
                         Some(i) => {
                             let i = i.parse::<usize>().expect("Should have been int");
-                            let c = self.position.perft_top(i);
+                            let c = self.position.perft_top(i, &self.runtime);
                             self.respond(&format!(""));
                             self.respond(&format!("Nodes searched : {}", c));
                             self.respond(&format!(""));
