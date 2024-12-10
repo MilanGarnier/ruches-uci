@@ -110,12 +110,17 @@ impl UciInterface {
                         Some("moves") | Some("move") => {
                             for move_notation in parsed {
                                 match self.position.getmove(move_notation) {
-                                    None => {
+                                    Err(())=> {
+                                        return self.failed_parsing_behavior(
+                                            "position was illegal to begin with",
+                                        );
+                                    }
+                                    Ok(None) => {
                                         return self.failed_parsing_behavior(
                                             "did not manage to play move",
                                         );
                                     }
-                                    Some(m) => self.position = self.position.play(&m),
+                                    Ok(Some(m)) => self.position = self.position.play_pseudolegal(&m),
                                 }
                             }
                         }

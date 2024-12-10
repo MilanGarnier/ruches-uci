@@ -1,4 +1,5 @@
 #![feature(random)]
+#![feature(once_cell_get_mut)]
 
 pub mod eval;
 pub mod position;
@@ -6,7 +7,6 @@ mod uci;
 
 #[tokio::main]
 async fn main() {
-    position::movegen::static_attacks::init_attack_tables().await;
     let mut args: Vec<_> = std::env::args().collect();
 
     let mut interface = uci::UciInterface::create();
