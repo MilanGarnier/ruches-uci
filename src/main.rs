@@ -7,6 +7,7 @@ mod uci;
 
 #[tokio::main]
 async fn main() {
+    position::movegen::static_attacks::init_attack_tables().await;
     let mut args: Vec<_> = std::env::args().collect();
 
     let mut interface = uci::UciInterface::create();
