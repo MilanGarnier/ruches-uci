@@ -599,7 +599,7 @@ impl Position {
 }
 
 use super::eval::{self, Eval, EvalState};
-use super::tt::{Hashable, PerftCache, PerftInfo};
+use super::tt::{PerftCache, PerftInfo};
 impl Position {
     /*#[cfg(debug_assertions)]
     fn assert_squares_occupied_only_once(&self) {
@@ -690,28 +690,6 @@ fn basic_perft() {
     assert_eq!(ml.len(), 20);
 }
 
-#[test]
-fn zobrist() {
-    let mut a = Position::startingpos();
-    let l = Lookup::init();
-    let ml = AugmentedPos::list_issues(&a, &l).unwrap();
-    let initial_hash = Position::hash(&a);
-    for m in ml.iter() {
-        a.stack(m);
-        assert_ne!(
-            initial_hash,
-            Position::hash(&a),
-            "Hash collision detected playing a single move (should have changed)"
-        );
-        a.unstack(m);
-    }
-    assert_eq!(
-        initial_hash,
-        Position::hash(&a),
-        "Hash has been altered in issue exploration phase"
-    );
-}
-
 #[cfg(test)]
 mod tests {
     extern crate test;
@@ -724,5 +702,25 @@ mod tests {
         b.iter(|| {
             a.perft_top(3, &l);
         });
+    }
+
+    #[test]
+    fn zobrist() {
+        let mut a = super::Position::startingpos();
+        let l = super::Lookup::init();
+        let ml = super::AugmentedPos::list_issues(&a, &l).unwrap();
+        let initial_hash = super::zobrist::zobrist_hash_playerstorage(&a.pos);
+        for m in ml.iter() {
+            a.stack(m);
+            assert_ne!(
+                initial_hash, a.zobrist,
+                "Hash collision detected playing a single move (should have changed)"
+            );
+            a.unstack(m);
+        }
+        assert_eq!(
+            initial_hash, a.zobrist,
+            "Hash has been altered in issue exploration phase"
+        );
     }
 }
