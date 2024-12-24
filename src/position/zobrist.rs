@@ -1,8 +1,7 @@
-
 /** Zobrist hashing : Zobrist hashing algorithm for Position, AugmentedPos.
  * This implements the Hashable trait. The safety feature is the moveCount+castleRights (basic) for now
  */
-use crate::tt::Hashable;
+use super::super::tt::Hashable;
 
 use super::{
     PieceSet, Player, PlayerStorage, Position,
@@ -20,8 +19,8 @@ impl Hashable<usize> for Position {
             ^ (x.castles.hash() * 4654987)
             ^ (x.half_move_count * 98798462468384)
             ^ x.en_passant.to_bb64() as usize
-            ^ (x.pos.black.occupied().to_bb64() as usize).wrapping_mul( 6541653246798795667)
-            ^ (x.pos.white.occupied().to_bb64() as usize).wrapping_mul( 9897995300789921388)
+            ^ (x.pos.black.occupied().to_bb64() as usize).wrapping_mul(6541653246798795667)
+            ^ (x.pos.white.occupied().to_bb64() as usize).wrapping_mul(9897995300789921388)
     }
 }
 

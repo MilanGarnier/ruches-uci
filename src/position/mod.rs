@@ -8,7 +8,7 @@ pub trait Parsing {
 
 use bitboard::{BBSquare, Bitboard, File, FromBB, GenericBB, Rank, SpecialBB, Square, ToBB};
 
-use castle::{CASTLES_ALL_FORBIDDEN, Castle};
+use castle::{CASTLES_ALL_ALLOWED, CASTLES_ALL_FORBIDDEN, Castle, CastleData};
 use movegen::static_attacks::Lookup;
 use movegen::{
     AtomicMove, AugmentedPos, CaptureData, Change, Move, PartialMove, Promotion, StandardMove,
@@ -21,8 +21,7 @@ pub mod movegen;
 pub mod piece;
 pub mod zobrist;
 
-use crate::position::castle::{CASTLES_ALL_ALLOWED, CastleData};
-use crate::position::piece::Piece;
+use piece::Piece;
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Player {
@@ -599,8 +598,8 @@ impl Position {
     }
 }
 
-use crate::eval::{self, Eval, EvalState};
-use crate::tt::{Hashable, PerftCache, PerftInfo};
+use super::eval::{self, Eval, EvalState};
+use super::tt::{Hashable, PerftCache, PerftInfo};
 impl Position {
     /*#[cfg(debug_assertions)]
     fn assert_squares_occupied_only_once(&self) {

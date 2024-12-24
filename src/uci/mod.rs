@@ -1,5 +1,5 @@
-use crate::position::{movegen::static_attacks::Lookup, Position};
-use std::{ io::stdin, sync::Mutex};
+use super::position::{Position, movegen::static_attacks::Lookup};
+use std::{io::stdin, sync::Mutex};
 
 const BUILD_NAME: &str = env!("CARGO_PKG_NAME");
 const BUILD_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -17,16 +17,16 @@ pub struct UciInterface<'a> {
     state: Mutex<State>,
     debug: bool,
     position: Position, // TODO add here internal configuration
-    runtime : &'a Lookup,
+    runtime: &'a Lookup,
 }
 
 impl<'a> UciInterface<'a> {
-    pub fn create(runtime : &'a Lookup ) -> Self {
+    pub fn create(runtime: &'a Lookup) -> Self {
         Self {
             state: Mutex::new(State::Free),
             debug: true,
             position: Position::startingpos(),
-            runtime : runtime
+            runtime: runtime,
         }
     }
     // blocking until quit is recieved
@@ -112,7 +112,7 @@ impl<'a> UciInterface<'a> {
                         Some("moves") | Some("move") => {
                             for move_notation in parsed {
                                 match self.position.getmove(move_notation, &self.runtime) {
-                                    Err(())=> {
+                                    Err(()) => {
                                         return self.failed_parsing_behavior(
                                             "position was illegal to begin with",
                                         );

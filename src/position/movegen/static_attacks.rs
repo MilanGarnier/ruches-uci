@@ -1,8 +1,8 @@
 use std::random;
 use std::time::{Duration, Instant};
 
-use crate::position::UciNotation;
-use crate::position::bitboard::{Bitboard, File, FromBB, GenericBB, Rank, SpecialBB, Square, ToBB};
+use super::UciNotation;
+use super::bitboard::{Bitboard, File, FromBB, GenericBB, Rank, SpecialBB, Square, ToBB};
 
 use super::dyn_attacks;
 
@@ -511,7 +511,7 @@ mod tests {
     extern crate test;
     use test::Bencher;
 
-    use crate::position::bitboard::ToBB;
+    use super::super::bitboard::ToBB;
     #[bench]
     fn attack_queen_all_squares_static(b: &mut Bencher) {
         let l = super::Lookup::init();

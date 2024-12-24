@@ -1,8 +1,8 @@
+use super::bitboard::{Bitboard, File, Rank};
 use super::{
     Player,
     bitboard::{GenericBB, SpecialBB, ToBB},
 };
-use crate::position::bitboard::{Bitboard, File, Rank};
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Piece {

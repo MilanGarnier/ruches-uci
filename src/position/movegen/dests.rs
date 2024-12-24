@@ -1,8 +1,8 @@
-use crate::position::bitboard;
-use crate::position::bitboard::GenericBB;
-use crate::position::bitboard::SpecialBB;
-use crate::position::bitboard::Square;
-use crate::position::bitboard::ToBB;
+use super::bitboard;
+use super::bitboard::GenericBB;
+use super::bitboard::SpecialBB;
+use super::bitboard::Square;
+use super::bitboard::ToBB;
 
 use super::AugmentedPos;
 use super::bitboard::{Bitboard as BB, Rank};
