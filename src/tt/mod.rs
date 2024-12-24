@@ -1,6 +1,5 @@
 use std::{fmt::Debug, marker::PhantomData, mem::MaybeUninit, ops::Index};
 
-use crate::position::movegen::AugmentedPos;
 
 use super::position::Position;
 

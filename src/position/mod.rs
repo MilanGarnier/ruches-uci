@@ -600,7 +600,7 @@ impl Position {
 }
 
 use crate::eval::{self, Eval, EvalState};
-use crate::tt::{Cache, Hashable, PerftCache, PerftInfo};
+use crate::tt::{Hashable, PerftCache, PerftInfo};
 impl Position {
     /*#[cfg(debug_assertions)]
     fn assert_squares_occupied_only_once(&self) {

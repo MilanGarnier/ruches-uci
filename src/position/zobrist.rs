@@ -1,5 +1,3 @@
-use core::hash;
-use std::intrinsics::wrapping_mul;
 
 /** Zobrist hashing : Zobrist hashing algorithm for Position, AugmentedPos.
  * This implements the Hashable trait. The safety feature is the moveCount+castleRights (basic) for now

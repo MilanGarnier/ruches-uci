@@ -20,7 +20,7 @@ impl MoveList {
 }
 
 #[derive(Clone, Copy)]
-struct ForcedMate {
+pub struct ForcedMate {
     p: Player,
     hmove_count: usize,
 }
@@ -59,7 +59,7 @@ impl ForcedMate {
     }
 }
 #[derive(Clone, Copy)]
-struct ApproxEval {
+pub struct ApproxEval {
     x: i32,
     depth: usize,
 }

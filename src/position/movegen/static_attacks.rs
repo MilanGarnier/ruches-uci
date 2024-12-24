@@ -3,7 +3,6 @@ use std::time::{Duration, Instant};
 
 use crate::position::UciNotation;
 use crate::position::bitboard::{Bitboard, File, FromBB, GenericBB, Rank, SpecialBB, Square, ToBB};
-use crate::position::movegen::static_attacks;
 
 use super::dyn_attacks;
 
