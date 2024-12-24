@@ -123,13 +123,6 @@ struct AttackTablePart<const N: usize> {
 }
 
 impl<const N: usize> AttackTablePart<N> {
-    pub fn empty() -> Self {
-        Self {
-            key: 0,
-            blocker_mask: Bitboard(GenericBB(0)),
-            outcomes: [Bitboard(GenericBB(0)); N],
-        }
-    }
     pub fn empty_in_place(&mut self) {
         self.key = 0;
         self.blocker_mask = Bitboard(GenericBB(0));
@@ -234,13 +227,6 @@ impl<const N: usize> std::ops::Index<(Bitboard<Square>, Bitboard<GenericBB>)> fo
 }
 
 impl<const N: usize> AttackTable<N> {
-    pub fn empty() -> Self {
-        Self {
-            init: None,
-            data: [AttackTablePart::empty(); 64],
-        }
-    }
-
     pub fn empty_in_place(&mut self) {
         self.init = None;
         for i in 0..64 {

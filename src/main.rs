@@ -2,7 +2,6 @@
 #![feature(once_cell_get_mut)]
 #![feature(ptr_as_ref_unchecked)]
 #![feature(test)]
-#![feature(core_intrinsics)]
 
 use position::movegen;
 pub mod eval;

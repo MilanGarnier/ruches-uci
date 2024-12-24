@@ -1,33 +1,23 @@
-use super::{Bitboard, GenericBB, Move, Piece, Square};
-use std::{
-    fmt::Debug,
-    intrinsics::{likely, unlikely},
-    mem::MaybeUninit,
-    ops::Index,
-};
+use super::Move;
+use std::{fmt::Debug, mem::MaybeUninit, ops::Index};
 
 // Pre move generation
 // When computing attacks, stores them in a buffer so that they can be exploited later during move generation
 
-// up to 15 th max entries that would go in a PregenCache, but practically 7 in most realistic cases
-// we could assume the cost of one heap alloc once it goes over 7
-pub type MoveEntry = (Piece, Bitboard<Square>, Bitboard<GenericBB>);
-
 // if used for move generation
-pub type MoveVec = PregenCache<60, Move>;
-pub type RelevantAttacksVec = PregenCache<8, MoveEntry>;
+pub type MoveVec = FastVec<60, Move>;
 
 // this buffer is used to save data
-pub struct PregenCache<const N: usize, EntryType: Copy> {
+pub struct FastVec<const N: usize, EntryType: Copy> {
     // max th maximum, could go lower ? not sure -> or use heap if more than 8 of them for instance
     stack: [MaybeUninit<EntryType>; N],
     heap: MaybeUninit<Vec<EntryType>>,
     counter: usize,
     already_init_heap: bool,
 }
-impl<const N: usize, EntryType: Copy> PregenCache<N, EntryType> {
+impl<const N: usize, EntryType: Copy> FastVec<N, EntryType> {
     pub fn new() -> Self {
-        PregenCache {
+        FastVec {
             stack: [MaybeUninit::uninit(); N],
             counter: 0,
             heap: MaybeUninit::uninit(),
@@ -35,7 +25,7 @@ impl<const N: usize, EntryType: Copy> PregenCache<N, EntryType> {
         }
     }
     pub fn push(&mut self, entry: EntryType) {
-        if likely(self.counter < N) {
+        if self.counter < N {
             self.stack[self.counter] = MaybeUninit::new(entry);
             self.counter += 1;
         } else {
@@ -52,7 +42,7 @@ impl<const N: usize, EntryType: Copy> PregenCache<N, EntryType> {
     }
 
     pub fn pop(&mut self) -> Option<EntryType> {
-        if unlikely(self.counter > N) {
+        if self.counter > N {
             self.counter -= 1;
             unsafe { self.heap.assume_init_mut().pop() }
         } else if self.counter >= 1 {
@@ -75,7 +65,7 @@ impl<const N: usize, EntryType: Copy> PregenCache<N, EntryType> {
     }
 }
 
-impl<const N: usize, EntryType: Copy + Debug> Debug for PregenCache<N, EntryType> {
+impl<const N: usize, EntryType: Copy + Debug> Debug for FastVec<N, EntryType> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let _r = write!(f, "PregenCache<{}> | [ ", N);
         for i in 0..self.counter {
@@ -92,7 +82,7 @@ impl<const N: usize, EntryType: Copy + Debug> Debug for PregenCache<N, EntryType
 }
 
 impl<const N: usize, const A: usize, EntryType: Copy + Debug + Sized> From<[EntryType; A]>
-    for PregenCache<N, EntryType>
+    for FastVec<N, EntryType>
 {
     fn from(f: [EntryType; A]) -> Self {
         let mut s = Self::new();
@@ -105,16 +95,16 @@ impl<const N: usize, const A: usize, EntryType: Copy + Debug + Sized> From<[Entr
 
 pub struct LocalVecIterator<'a, const N: usize, EntryType: Copy> {
     curr: usize,
-    lvec: &'a PregenCache<N, EntryType>,
+    lvec: &'a FastVec<N, EntryType>,
 }
 
 impl<'a, const N: usize, EntryType: Copy> Iterator for LocalVecIterator<'a, N, EntryType> {
     type Item = &'a EntryType;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if unlikely(self.lvec.counter == self.curr) {
+        if self.lvec.counter == self.curr {
             None
-        } else  if likely(self.curr < N) {
+        } else if self.curr < N {
             let x = self.curr;
             self.curr += 1;
             Some(unsafe { self.lvec.stack[x].assume_init_ref() })
@@ -126,7 +116,7 @@ impl<'a, const N: usize, EntryType: Copy> Iterator for LocalVecIterator<'a, N, E
     }
 }
 
-impl<'a, const N: usize, EntryType: Copy> Drop for PregenCache<N, EntryType> {
+impl<'a, const N: usize, EntryType: Copy> Drop for FastVec<N, EntryType> {
     fn drop(&mut self) {
         if self.already_init_heap {
             unsafe {
@@ -136,13 +126,13 @@ impl<'a, const N: usize, EntryType: Copy> Drop for PregenCache<N, EntryType> {
     }
 }
 
-impl<'a, const N: usize, EntryType: Copy> Index<usize> for PregenCache<N, EntryType> {
+impl<'a, const N: usize, EntryType: Copy> Index<usize> for FastVec<N, EntryType> {
     #[inline(always)]
     fn index(&self, i: usize) -> &EntryType {
-        if unlikely(i >= self.counter) {
+        if i >= self.counter {
             panic!()
         }
-        if unlikely(i >= N) {
+        if i >= N {
             unsafe { &self.heap.assume_init_ref()[i - N] }
         } else {
             unsafe { self.stack[i].assume_init_ref() }

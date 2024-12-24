@@ -1,6 +1,6 @@
 use std::fmt::Debug;
 
-use customvec::{MoveVec, PregenCache};
+use customvec::{FastVec, MoveVec};
 use dests::generate_next_en_passant_data;
 use localvec as customvec;
 
@@ -510,11 +510,11 @@ pub fn generate_pawn_atmove(
     src: &Bitboard<Square>,
     dest: &Bitboard<Square>,
     piece: &Piece,
-) -> PregenCache<4, AtomicMove> {
+) -> FastVec<4, AtomicMove> {
     let is_prom = (*piece as usize == Piece::Pawn as usize)
         && (dest.declass() & (Rank::R1.declass() | Rank::R8.declass()))
             != SpecialBB::Empty.declass();
-    let mut p: PregenCache<4, AtomicMove> = PregenCache::new();
+    let mut p: FastVec<4, AtomicMove> = FastVec::new();
     match is_prom {
         false => {
             p.push(generate_non_promoting_atmove(src, dest, piece));
