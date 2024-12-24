@@ -1,15 +1,18 @@
 #![feature(random)]
 #![feature(once_cell_get_mut)]
 #![feature(ptr_as_ref_unchecked)]
+#![feature(test)]
 #![feature(core_intrinsics)]
 
 use position::movegen;
-
 pub mod eval;
 pub mod position;
+pub mod tt; // transposition tables
 mod uci;
 
 fn main() {
+    //println!("Zobrist key {:?}", position::zobrist::random_zobrist_seed());
+
     let pregen_attacks = movegen::static_attacks::Lookup::init();
     let mut args: Vec<_> = std::env::args().collect();
 

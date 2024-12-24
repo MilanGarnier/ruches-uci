@@ -521,6 +521,9 @@ pub enum Square {
     g8 = (Square::f8 as u64) << 1,
     h8 = (Square::g8 as u64) << 1,
 }
+impl Square {
+    pub const COUNT: usize = 64;
+}
 impl Bitboard<Square> {
     pub fn to_index(&self) -> u32 {
         (self.0 as u64).trailing_zeros()

@@ -58,7 +58,7 @@ pub struct CastleRights {
 trait Revertible<Commit>: Sized + Copy + PartialEq {
     // with stack() then unstack() the object has to remain unchanged
     fn stack(&mut self, c: &Commit);
-    
+
     /*
     fn unstack(&mut self, c: &Commit) {
         self.stack(c);
@@ -93,7 +93,7 @@ impl Index<Castle> for CastleRights {
     }
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, PartialEq)]
 pub struct CastleData {
     pub x: [CastleRights; Player::COUNT],
 }
@@ -106,6 +106,19 @@ impl CastleData {
     }
     pub fn fetch(&self, p: Player, c: Castle) -> bool {
         self.x[p as usize][c]
+    }
+    pub fn hash(&self) -> usize {
+        // TODO: improve speed
+        let mut h = 0;
+        for b in self.x {
+            for b in b.x {
+                h *= 2;
+                if b {
+                    h += 1;
+                }
+            }
+        }
+        h
     }
 }
 

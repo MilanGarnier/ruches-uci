@@ -19,6 +19,7 @@ debug = true
 debug-assertions = false
 
 [profile.dev]
+opt-level = 3
 
 [env]
 RUST_MIN_STACK = "8388608"

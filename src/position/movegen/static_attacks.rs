@@ -3,9 +3,9 @@ use std::time::{Duration, Instant};
 
 use crate::position::UciNotation;
 use crate::position::bitboard::{Bitboard, File, FromBB, GenericBB, Rank, SpecialBB, Square, ToBB};
+use crate::position::movegen::static_attacks;
 
 use super::dyn_attacks;
-
 
 const TS_ROOK: usize = 2 * 4096; // optimum is 2**12 = 4096
 const TS_BISHOP: usize = 2 * 512; // optimum is 2**9 = 512
@@ -507,9 +507,45 @@ const MAGIC_KEYS_ROOK: [u64; 64] = [
     3762411517383666422,
 ];
 
-#[test]
-fn static_attacks_testing() {
-    // println!("[StaticAttacks] Size of lookup : {}", std::mem::size_of::<Lookup>() );
+#[cfg(test)]
+mod tests {
+    extern crate test;
+    use test::Bencher;
 
-    // let l = Lookup::init();
+    use crate::position::bitboard::ToBB;
+    #[bench]
+    fn attack_queen_all_squares_static(b: &mut Bencher) {
+        let l = super::Lookup::init();
+        // test attacks without opposition
+        let blockers = super::SpecialBB::Empty.declass();
+        for sq in super::SpecialBB::Full.declass() {
+            assert_eq!(
+                super::dyn_attacks::generate_bishops(sq.declass(), blockers),
+                l.generate_bishops(sq.declass(), blockers)
+            );
+            assert_eq!(
+                super::dyn_attacks::generate_rooks(sq.declass(), blockers),
+                l.generate_rooks(sq.declass(), blockers)
+            );
+            assert_eq!(
+                super::dyn_attacks::generate_queens(sq.declass(), blockers),
+                l.generate_queens(sq.declass(), blockers)
+            )
+        }
+
+        let blockers = super::SpecialBB::Empty.declass();
+        for sq in super::SpecialBB::Full.declass() {
+            let sg = sq.declass();
+            b.iter(|| l.generate_rooks(sg, blockers));
+        }
+    }
+
+    #[bench]
+    fn attack_queen_all_squares_dyn(b: &mut Bencher) {
+        let blockers = super::SpecialBB::Empty.declass();
+        for sq in super::SpecialBB::Full.declass() {
+            let sg = sq.declass();
+            b.iter(|| super::dyn_attacks::generate_queens(sg, blockers));
+        }
+    }
 }

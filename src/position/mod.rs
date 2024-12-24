@@ -13,11 +13,13 @@ use movegen::static_attacks::Lookup;
 use movegen::{
     AtomicMove, AugmentedPos, CaptureData, Change, Move, PartialMove, Promotion, StandardMove,
 };
+use zobrist::{zobrist_hash_bitboard, zobrist_hash_square};
 
 pub mod bitboard;
 mod castle;
 pub mod movegen;
 pub mod piece;
+pub mod zobrist;
 
 use crate::position::castle::{CASTLES_ALL_ALLOWED, CastleData};
 use crate::position::piece::Piece;
@@ -36,6 +38,7 @@ impl Player {
             Player::White => Player::Black,
         }
     }
+    #[inline(always)]
     pub const fn backrank(&self) -> Bitboard<Rank> {
         match self {
             Player::Black => Bitboard(Rank::R8),
@@ -51,7 +54,7 @@ impl Player {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PieceSet {
     pawns: Bitboard<GenericBB>,
     knights: Bitboard<GenericBB>,
@@ -60,7 +63,7 @@ pub struct PieceSet {
     queens: Bitboard<GenericBB>,
     king: Bitboard<GenericBB>, // TODO: move to squares
 }
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PlayerStorage<T> {
     black: T,
     white: T,
@@ -144,13 +147,14 @@ impl<T> std::ops::IndexMut<Player> for PlayerStorage<T> {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Position {
     pub fifty_mv: usize,
     half_move_count: usize,
     pos: PieceData,
     castles: CastleData,
     en_passant: Bitboard<GenericBB>,
+    zobrist: usize,
 }
 
 impl PieceSet {
@@ -198,6 +202,7 @@ impl Position {
             pos: PieceData::startingpos(),
             castles: CASTLES_ALL_ALLOWED,
             en_passant: SpecialBB::Empty.declass(),
+            zobrist: zobrist::zobrist_hash_playerstorage(&PieceData::startingpos()),
         }
     }
     pub fn empty() -> Self {
@@ -207,6 +212,7 @@ impl Position {
             pos: PieceData::empty(),
             castles: CASTLES_ALL_FORBIDDEN,
             en_passant: SpecialBB::Empty.declass(),
+            zobrist: zobrist::zobrist_hash_playerstorage(&PieceData::empty()),
         }
     }
     pub fn pos(&self) -> &PieceData {
@@ -231,7 +237,9 @@ impl Position {
                 }
             }
         }
-        self.pos[pl][cd.piece] = self.pos[pl][cd.piece] ^ cd.dst
+        self.pos[pl][cd.piece] = self.pos[pl][cd.piece] ^ cd.dst;
+
+        self.zobrist ^= zobrist_hash_square(cd.dst, cd.piece, pl);
     }
 
     fn stack_change_rev(&mut self, ch: &Change, pl: Player) {
@@ -247,12 +255,17 @@ impl Position {
                 }
             }
         }
-        self.pos[pl][ch.piece()] = self.pos[pl][ch.piece()] ^ ch.bitboard()
+        self.pos[pl][ch.piece()] = self.pos[pl][ch.piece()] ^ ch.bitboard();
+        self.zobrist ^= zobrist_hash_bitboard(ch.bitboard(), ch.piece(), pl);
     }
     fn stack_prom_rev(&mut self, pr: &Promotion) {
         let turn = self.turn();
+
         self.pos[turn][pr.new] = self.pos[turn][pr.new] ^ pr.dest;
         self.pos[turn][Piece::Pawn] = self.pos[turn][Piece::Pawn] ^ pr.from;
+
+        self.zobrist ^= zobrist_hash_square(pr.dest, pr.new, turn);
+        self.zobrist ^= zobrist_hash_square(pr.from, Piece::Pawn, turn);
     }
     fn stack_atomic_rev(&mut self, amv: &AtomicMove) {
         match amv {
@@ -272,16 +285,24 @@ impl Position {
         let turn = self.turn();
         match cs {
             Castle::Short => {
-                self.pos[turn][Piece::King] = self.pos[turn][Piece::King]
-                    ^ turn.backrank().declass() & (File::E.declass() | File::G.declass());
-                self.pos[turn][Piece::Rook] = self.pos[turn][Piece::Rook]
-                    ^ turn.backrank().declass() & (File::H.declass() | File::F.declass());
+                let king_ch = turn.backrank().declass() & (File::E.declass() | File::G.declass());
+                let rook_ch = turn.backrank().declass() & (File::H.declass() | File::F.declass());
+
+                self.pos[turn][Piece::King] = self.pos[turn][Piece::King] ^ king_ch;
+                self.pos[turn][Piece::Rook] = self.pos[turn][Piece::Rook] ^ rook_ch;
+
+                self.zobrist ^= zobrist_hash_bitboard(king_ch, Piece::King, turn);
+                self.zobrist ^= zobrist_hash_bitboard(rook_ch, Piece::Rook, turn);
             }
             Castle::Long => {
-                self.pos[turn][Piece::King] = self.pos[turn][Piece::King]
-                    ^ turn.backrank().declass() & (File::E.declass() | File::C.declass());
-                self.pos[turn][Piece::Rook] = self.pos[turn][Piece::Rook]
-                    ^ turn.backrank().declass() & (File::A.declass() | File::D.declass());
+                let king_ch = turn.backrank().declass() & (File::E.declass() | File::C.declass());
+                let rook_ch = turn.backrank().declass() & (File::A.declass() | File::D.declass());
+
+                self.pos[turn][Piece::King] = self.pos[turn][Piece::King] ^ king_ch;
+                self.pos[turn][Piece::Rook] = self.pos[turn][Piece::Rook] ^ rook_ch;
+
+                self.zobrist ^= zobrist_hash_bitboard(king_ch, Piece::King, turn);
+                self.zobrist ^= zobrist_hash_bitboard(rook_ch, Piece::Rook, turn);
             }
         }
     }
@@ -331,6 +352,11 @@ impl Position {
     }
 
     pub fn perft_top(&mut self, depth: usize, pregen: &Lookup) -> usize {
+        let mut cache = match depth {
+            0..=3 => PerftCache::new(1),
+            4..=5 => PerftCache::new(1024 * 1024),
+            6.. => PerftCache::new(4 * 1024 * 1024),
+        };
         match depth {
             0 => 0,
             _ => {
@@ -343,17 +369,25 @@ impl Position {
                 let mut sum = 0;
                 for m in ml.iter() {
                     self.stack(m);
-                    let count = self.perft_rec(depth - 1, pregen);
+                    let count = self.perft_rec(depth - 1, pregen, 1, &mut cache);
                     println!("{}: {}", m.uci(), count);
                     sum += count;
                     self.unstack(m);
                 }
+                #[cfg(debug_assertions)]
+                cache.print_stats();
                 sum
             }
         }
     }
 
-    fn perft_rec(&mut self, depth: usize, pregen: &Lookup) -> usize {
+    fn perft_rec(
+        &mut self,
+        depth: usize,
+        pregen: &Lookup,
+        depth_in: usize,
+        cache: &mut PerftCache,
+    ) -> usize {
         match depth {
             0 => {
                 let a = AugmentedPos::list_issues(&self, pregen);
@@ -370,6 +404,20 @@ impl Position {
                 }
             }
             _ => {
+                // minimum depth to have transpositions happening
+                if depth_in >= 4 && depth >= 2 {
+                    match cache[&self] {
+                        Some(x) => {
+                            //println!("Found entry");
+                            if x.depth as usize == depth {
+                                //println!("Found transposition {:?}", x);
+                                return x.nodes as usize;
+                            } else {
+                            }
+                        }
+                        None => (),
+                    }
+                };
                 let r = AugmentedPos::list_issues(self, pregen);
                 let ml = match r {
                     Err(()) => return 0,
@@ -379,9 +427,16 @@ impl Position {
                 let mut sum = 0;
                 for m in ml.iter() {
                     self.stack(m);
-                    let count = self.perft_rec(depth - 1, pregen);
+                    let count = self.perft_rec(depth - 1, pregen, depth_in + 1, cache);
+
                     self.unstack(m);
                     sum += count;
+                }
+                if depth_in >= 4 && depth >= 2 {
+                    cache.push(&self, &PerftInfo {
+                        depth: depth as u32,
+                        nodes: sum as u32,
+                    });
                 }
                 sum
             }
@@ -545,6 +600,7 @@ impl Position {
 }
 
 use crate::eval::{self, Eval, EvalState};
+use crate::tt::{Cache, Hashable, PerftCache, PerftInfo};
 impl Position {
     /*#[cfg(debug_assertions)]
     fn assert_squares_occupied_only_once(&self) {
@@ -624,5 +680,50 @@ impl Position {
                 }
             }
         }
+    }
+}
+
+#[test]
+fn basic_perft() {
+    let a = Position::startingpos();
+    let l = Lookup::init();
+    let ml = AugmentedPos::list_issues(&a, &l).unwrap();
+    assert_eq!(ml.len(), 20);
+}
+
+#[test]
+fn zobrist() {
+    let mut a = Position::startingpos();
+    let l = Lookup::init();
+    let ml = AugmentedPos::list_issues(&a, &l).unwrap();
+    let initial_hash = Position::hash(&a);
+    for m in ml.iter() {
+        a.stack(m);
+        assert_ne!(
+            initial_hash,
+            Position::hash(&a),
+            "Hash collision detected playing a single move (should have changed)"
+        );
+        a.unstack(m);
+    }
+    assert_eq!(
+        initial_hash,
+        Position::hash(&a),
+        "Hash has been altered in issue exploration phase"
+    );
+}
+
+#[cfg(test)]
+mod tests {
+    extern crate test;
+    use test::Bencher;
+    #[bench]
+    fn perft_startpos_3(b: &mut Bencher) {
+        let mut a = super::Position::startingpos();
+        let l = super::Lookup::init();
+
+        b.iter(|| {
+            a.perft_top(3, &l);
+        });
     }
 }

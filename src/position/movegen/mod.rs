@@ -379,7 +379,7 @@ pub fn generate_castle_data(
 
 // return in [0/1/2]
 pub fn generate_castle_move(meta: &AugmentedPos, c: castle::Castle) -> Option<Move> {
-    if meta.p.castles.fetch(meta.player(), c)  // right to castle 
+    if meta.p.castles.fetch(meta.player(), c)  // right to castle
     &&  meta.attacked[meta.opponent()] & (c.files() & meta.player().backrank()) == SpecialBB::Empty.declass()  // no attacks on path (including check)
     &&  (meta.occupied[meta.player()] | meta.occupied[meta.opponent()]) & (c.free_files() & meta.player().backrank()) == SpecialBB::Empty.declass()
     // no piece on rook&king path

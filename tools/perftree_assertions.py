@@ -1,8 +1,7 @@
 import subprocess
 
 RUCHES_RELEASE = "target/release/ruches"
-REF_COMMAND =    "stockfish"
-
+REF_COMMAND = "stockfish"
 
 
 positions = [
@@ -11,10 +10,10 @@ positions = [
     "position fen r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 0",
     "position fen r3k2r/Pppp1ppp/1b3nbN/nP6/BBP1P3/q4N2/Pp1P2PP/R2Q1RK1 w kq - 0 1",
     "position fen rnbq1k1r/pp1Pbppp/2p5/8/2B5/8/PPP1NnPP/RNBQK2R w KQ - 1 8",
-    "position fen r4rk1/1pp1qppp/p1np1n2/2b1p1B1/2B1P1b1/P1NP1N2/1PP1QPPP/R4RK1 w - - 0 10"
+    "position fen r4rk1/1pp1qppp/p1np1n2/2b1p1B1/2B1P1b1/P1NP1N2/1PP1QPPP/R4RK1 w - - 0 10",
 ]
 
-depths = [3,4,5,6]
+depths = [3, 4, 5, 6]
 
 
 import subprocess
@@ -23,10 +22,12 @@ import threading
 
 s = []
 
+
 def read_stdout(pipe):
     """Reads stdout incrementally and prints output as it arrives."""
-    for line in iter(pipe.readline, ''):  # Read until EOF
+    for line in iter(pipe.readline, ""):  # Read until EOF
         s.append(line)
+
 
 def run_perft(command, pos, depth):
     global s
@@ -38,7 +39,7 @@ def run_perft(command, pos, depth):
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
-        bufsize=1
+        bufsize=1,
     )
 
     # Start a thread to read stdout incrementally
@@ -49,7 +50,7 @@ def run_perft(command, pos, depth):
     process.stdin.write("{}\n".format(pos))
     process.stdin.flush()
 
-    time.sleep(0.25) # leave time to load data before benchmarking
+    time.sleep(0.25)  # leave time to load data before benchmarking
 
     t = time.time()
 
@@ -65,27 +66,27 @@ def run_perft(command, pos, depth):
     stdout_thread.join()
     dt = time.time() - t
     try:
-        s =  s[-2].split(" ")[-1][:-1]
+        s = s[-2].split(" ")[-1][:-1]
     except:
         s = s[-1].split(" ")[-1][:-1]
     return s, dt
 
+
 import numpy
 
-x = [0]*2
+x = [0] * 2
 
 for i in range(len(positions)):
     p = positions[i]
     for d in depths:
-        print("[Position index {}] \tTest depth d = {}... ".format(i+1, d), end="")
+        print("[Position index {}] \tTest depth d = {}... ".format(i + 1, d), end="")
 
         tst, dt_tst = run_perft(RUCHES_RELEASE, p, d)
         ref, dt_ref = run_perft(REF_COMMAND, p, d)
 
-
         tst_count = int(tst)
         ref_count = int(ref)
-        if (tst_count==ref_count):
+        if tst_count == ref_count:
             print("OK! ({})".format(tst_count))
             print("Time spent [new = {}, ref(stockfish) = {}]".format(dt_tst, dt_ref))
         else:
@@ -94,5 +95,7 @@ for i in range(len(positions)):
         x[0] += dt_tst
         x[1] += dt_ref
 
-x = [ i / (len(positions) * len(depths)) for i in x ]
-print("Average time spent in (seconds) : new = {}, ref(stockfish) = {}".format(x[0], x[1]))
+x = [i / (len(positions) * len(depths)) for i in x]
+print(
+    "Average time spent in (seconds) : new = {}, ref(stockfish) = {}".format(x[0], x[1])
+)
