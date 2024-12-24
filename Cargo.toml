@@ -6,12 +6,19 @@ authors = ["Milan Garnier"]
 
 [dependencies]
 
-static_assertions = "1.1.0"
-
 futures = "0.3"
 tokio = { version = "1.42", features = ["full"] }
 
-once_cell = "1.20"
 
 [profile.release]
-#debug = true
+opt-level = 3
+
+[profile.bench]
+opt-level = 3
+debug = true
+debug-assertions = false
+
+[profile.dev]
+
+[env]
+RUST_MIN_STACK = "8388608"

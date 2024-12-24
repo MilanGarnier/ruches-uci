@@ -1,5 +1,5 @@
 use crate::position::{movegen::static_attacks::Lookup, Position};
-use std::{fmt::format, io::stdin, sync::Mutex};
+use std::{ io::stdin, sync::Mutex};
 
 const BUILD_NAME: &str = env!("CARGO_PKG_NAME");
 const BUILD_VERSION: &str = env!("CARGO_PKG_VERSION");

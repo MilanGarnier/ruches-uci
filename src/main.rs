@@ -9,9 +9,8 @@ pub mod eval;
 pub mod position;
 mod uci;
 
-#[tokio::main]
-async fn main() {
-    let pregen_attacks = movegen::static_attacks::Lookup::init().await;
+fn main() {
+    let pregen_attacks = movegen::static_attacks::Lookup::init();
     let mut args: Vec<_> = std::env::args().collect();
 
     let mut interface = uci::UciInterface::create(&pregen_attacks);
