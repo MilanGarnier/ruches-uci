@@ -1,5 +1,4 @@
 use std::{
-    fmt::{Display, Formatter},
     io::{Stdin, Stdout, Write, stdin, stdout},
     sync::Mutex,
 };
@@ -9,7 +8,7 @@ use crate::position::Position;
 const BUILD_NAME: &str = env!("CARGO_PKG_NAME");
 const BUILD_VERSION: &str = env!("CARGO_PKG_VERSION");
 const BUILD_AUTHORS: &str = env!("CARGO_PKG_AUTHORS");
-const BUILD_ABOUT: &str = "Simple rust chess engine that will get better";
+// const BUILD_ABOUT: &str = "Simple rust chess engine that will get better";
 // if accessible, you know the engine is in one of these states
 
 pub struct UciShell {
@@ -100,7 +99,13 @@ impl UciParser for UciShell {
 
     fn send_response(&mut self, r: UciResponse) -> Result<(), std::io::Error> {
         match r {
-            UciResponse::Debug(x) => writeln!(self.s_out, "debug \"{}\"", x),
+            UciResponse::Debug(x) => {
+                if self.debug {
+                    writeln!(self.s_out, "info string \"{}\"", x)
+                } else {
+                    Ok(())
+                }
+            }
             UciResponse::String(x) => writeln!(self.s_out, "{}", x),
             UciResponse::Id(x, y) => writeln!(self.s_out, "id {x} {y}"),
             UciResponse::Ok => writeln!(self.s_out, "uciok"),
@@ -143,12 +148,12 @@ impl UciShell {
         // TODO: might thread this
         loop {
             let mut buffer = String::new();
-            stdin().read_line(&mut buffer).expect("Unknown error.");
+            self.s_in.read_line(&mut buffer).expect("Unknown error.");
             let x = Self::parse(buffer);
 
             let sigquit = match x {
                 Ok(x) => self.runcommand(x).unwrap(),
-                Err(x) => false, // { std::io::Write::write_fmt(&mut self.s_out.lock(), Arguments:: "Error: {:?}", x); false }
+                Err(_) => false, // { std::io::Write::write_fmt(&mut self.s_out.lock(), Arguments:: "Error: {:?}", x); false }
             };
             if sigquit {
                 return;
@@ -158,14 +163,6 @@ impl UciShell {
 
     fn wait_ready(&mut self) {
         let _unused = self.state.lock().unwrap();
-    }
-
-    fn failed_parsing_behavior(&mut self, reason: &str) -> bool {
-        self.send_response(UciResponse::String(format!(
-            "Error while parsing : {}",
-            reason
-        )));
-        false
     }
 
     // returns response
@@ -220,14 +217,11 @@ impl UciShell {
                     self.send_response(UciResponse::String(format!("Nodes searched : {}", c)))?;
                     self.send_response(UciResponse::String("".to_string()))?;
                 }
-                _ => todo!(),
             },
 
             ParsedCommand::Quit => {
                 return Ok(true);
             }
-
-            _ => panic!("unsupported command."),
         };
         return Ok(false);
     }

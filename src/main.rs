@@ -25,7 +25,7 @@ fn main() {
             command += " ";
         }
         println!("Running command {:?}", command);
-        interface.runcommand(UciShell::parse(command).unwrap());
+        interface.runcommand(UciShell::parse(command).unwrap()).unwrap();
     } else {
         interface.run();
     }
