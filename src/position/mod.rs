@@ -9,7 +9,7 @@ pub trait Parsing {
 use bitboard::{BBSquare, Bitboard, File, FromBB, GenericBB, Rank, SpecialBB, Square, ToBB};
 
 use castle::{CASTLES_ALL_ALLOWED, CASTLES_ALL_FORBIDDEN, Castle, CastleData};
-use movegen::static_attacks::Lookup;
+use movegen::static_attacks::STATIC_ATTACKS;
 use movegen::{
     AtomicMove, AugmentedPos, CaptureData, Change, Move, PartialMove, Promotion, StandardMove,
 };
@@ -81,16 +81,11 @@ impl PieceSet {
     fn occupied(&self) -> Bitboard<GenericBB> {
         self.pawns | self.bishops | self.king | self.knights | self.queens | self.rooks
     }
-    fn attacks(
-        &self,
-        player: Player,
-        blockers: Bitboard<GenericBB>,
-        runtime: &Lookup,
-    ) -> Bitboard<GenericBB> {
+    fn attacks(&self, player: Player, blockers: Bitboard<GenericBB>) -> Bitboard<GenericBB> {
         movegen::dyn_attacks::generate_pawns(self[Piece::Pawn], player)
             | movegen::dyn_attacks::generate_knights(self[Piece::Knight])
-            | runtime.generate_bishops(self[Piece::Bishop] | self[Piece::Queen], blockers)
-            | runtime.generate_rooks(self[Piece::Rook] | self[Piece::Queen], blockers)
+            | STATIC_ATTACKS.generate_bishops(self[Piece::Bishop] | self[Piece::Queen], blockers)
+            | STATIC_ATTACKS.generate_rooks(self[Piece::Rook] | self[Piece::Queen], blockers)
             | movegen::dyn_attacks::generate_king(Square::from_bb(&self[Piece::King]).unwrap())
     }
 }
@@ -336,8 +331,8 @@ impl Position {
     }*/
 
     // very unoptimized, should not be called when we can access the move as &mv
-    pub fn getmove(&mut self, uci: &str, r: &Lookup) -> Result<Option<Move>, ()> {
-        let meta = AugmentedPos::list_issues(self, r);
+    pub fn getmove(&mut self, uci: &str) -> Result<Option<Move>, ()> {
+        let meta = AugmentedPos::list_issues(self);
         let moves = match meta {
             Err(()) => return Err(()),
             Ok(meta) => meta,
@@ -350,7 +345,7 @@ impl Position {
         Ok(None)
     }
 
-    pub fn perft_top(&mut self, depth: usize, pregen: &Lookup) -> usize {
+    pub fn perft_top(&mut self, depth: usize) -> usize {
         let mut cache = match depth {
             0..=3 => PerftCache::new(1),
             4..=5 => PerftCache::new(1024 * 1024),
@@ -359,7 +354,7 @@ impl Position {
         match depth {
             0 => 0,
             _ => {
-                let r = AugmentedPos::list_issues(self, pregen);
+                let r = AugmentedPos::list_issues(self);
                 let ml = match r {
                     Err(()) => return 0,
                     Ok(ml) => ml,
@@ -368,7 +363,7 @@ impl Position {
                 let mut sum = 0;
                 for m in ml.iter() {
                     self.stack(m);
-                    let count = self.perft_rec(depth - 1, pregen, 1, &mut cache);
+                    let count = self.perft_rec(depth - 1, 1, &mut cache);
                     println!("{}: {}", m.uci(), count);
                     sum += count;
                     self.unstack(m);
@@ -380,23 +375,17 @@ impl Position {
         }
     }
 
-    fn perft_rec(
-        &mut self,
-        depth: usize,
-        pregen: &Lookup,
-        depth_in: usize,
-        cache: &mut PerftCache,
-    ) -> usize {
+    fn perft_rec(&mut self, depth: usize, depth_in: usize, cache: &mut PerftCache) -> usize {
         match depth {
             0 => {
-                let a = AugmentedPos::list_issues(&self, pregen);
+                let a = AugmentedPos::list_issues(&self);
                 match a {
                     Ok(_) => 1,
                     Err(()) => 0,
                 }
             }
             1 => {
-                let r = AugmentedPos::list_issues(self, pregen);
+                let r = AugmentedPos::list_issues(self);
                 match r {
                     Err(()) => 0,
                     Ok(ml) => ml.len(),
@@ -417,7 +406,7 @@ impl Position {
                         None => (),
                     }
                 };
-                let r = AugmentedPos::list_issues(self, pregen);
+                let r = AugmentedPos::list_issues(self);
                 let ml = match r {
                     Err(()) => return 0,
                     Ok(ml) => ml,
@@ -426,7 +415,7 @@ impl Position {
                 let mut sum = 0;
                 for m in ml.iter() {
                     self.stack(m);
-                    let count = self.perft_rec(depth - 1, pregen, depth_in + 1, cache);
+                    let count = self.perft_rec(depth - 1, depth_in + 1, cache);
 
                     self.unstack(m);
                     sum += count;
@@ -621,18 +610,13 @@ impl Position {
             }
         }
     }*/
-    pub fn eval_minimax(
-        &mut self,
-        depth: usize,
-        eval_fn: &eval::EvalFun,
-        pregen: &Lookup,
-    ) -> Result<EvalState, ()> {
+    pub fn eval_minimax(&mut self, depth: usize, eval_fn: &eval::EvalFun) -> Result<EvalState, ()> {
         //#[cfg(debug_assertions)]
         //self.assert_squares_occupied_only_once();
         match depth {
             // TODO: add quiescent search for depth 1
             0 => {
-                let a = AugmentedPos::list_issues(&self, pregen);
+                let a = AugmentedPos::list_issues(&self);
                 match a {
                     Err(()) => Err(()),
                     Ok(_) => Ok(EvalState::new(&eval_fn(self))),
@@ -640,7 +624,7 @@ impl Position {
             }
             _ => {
                 let turn = self.turn();
-                let movelist = AugmentedPos::list_issues(self, pregen)?;
+                let movelist = AugmentedPos::list_issues(self)?;
                 //let is_check = !meta.is_check();
 
                 let mut best_eval = EvalState::new(&Eval::m0(turn.other()));
@@ -648,7 +632,7 @@ impl Position {
                 let mut explored = 0;
                 for m in movelist.iter() {
                     self.stack(m);
-                    let eval = self.eval_minimax(depth - 1, eval_fn, pregen);
+                    let eval = self.eval_minimax(depth - 1, eval_fn);
                     self.unstack(m);
                     match eval {
                         Err(()) => continue,
@@ -685,8 +669,7 @@ impl Position {
 #[test]
 fn basic_perft() {
     let a = Position::startingpos();
-    let l = Lookup::init();
-    let ml = AugmentedPos::list_issues(&a, &l).unwrap();
+    let ml = AugmentedPos::list_issues(&a).unwrap();
     assert_eq!(ml.len(), 20);
 }
 
@@ -697,18 +680,15 @@ mod tests {
     #[bench]
     fn perft_startpos_3(b: &mut Bencher) {
         let mut a = super::Position::startingpos();
-        let l = super::Lookup::init();
-
         b.iter(|| {
-            a.perft_top(3, &l);
+            a.perft_top(3);
         });
     }
 
     #[test]
     fn zobrist() {
         let mut a = super::Position::startingpos();
-        let l = super::Lookup::init();
-        let ml = super::AugmentedPos::list_issues(&a, &l).unwrap();
+        let ml = super::AugmentedPos::list_issues(&a).unwrap();
         let initial_hash = super::zobrist::zobrist_hash_playerstorage(&a.pos);
         for m in ml.iter() {
             a.stack(m);

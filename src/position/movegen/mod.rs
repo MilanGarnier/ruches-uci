@@ -4,7 +4,7 @@ use customvec::{FastVec, MoveVec};
 use dests::generate_next_en_passant_data;
 use localvec as customvec;
 
-use static_attacks::Lookup;
+use static_attacks::STATIC_ATTACKS;
 
 use super::bitboard::{self, Bitboard, File, FromBB, GenericBB, Rank, SpecialBB, Square, ToBB};
 use super::castle::{self, CASTLES_KEEP_UNCHANGED, Castle, CastleData};
@@ -399,12 +399,12 @@ pub fn generate_castle_move(meta: &AugmentedPos, c: castle::Castle) -> Option<Mo
     }
 }
 
-fn is_legal(p: &Position, mv: Move, r: &Lookup) -> bool {
+fn is_legal(p: &Position, mv: Move) -> bool {
     unsafe {
         let a = p as *const Position as *mut Position;
         let p = a.as_mut_unchecked();
         p.stack(&mv); // modifies p
-        let t = !AugmentedPos::is_illegal(&p, r);
+        let t = !AugmentedPos::is_illegal(&p);
         p.unstack(&mv);
         t
     }
@@ -446,25 +446,7 @@ fn add_to_move_list(p: &AugmentedPos, m: Move, movelist: &mut MoveVec) {
             //return;
         }
     }
-
-    /*#[cfg(debug_assertions)]
-    {
-        match (is_legal(p.p, m, p.runtime), edge_case) {
-            (true, true) => (),  // Good, false positive
-            (false, true) => (), // Good, it was necessary to check
-            (false, false) => {
-                println!("False Negative : {}", m.uci());
-                p.p.pretty_print();
-                panic!()
-            }
-            (true, _) => {
-                //println!("False positive : {}", m.uci());
-                //p.p.pretty_print()
-            }
-        }
-    }*/
-
-    if !edge_case || is_legal(p.p, m, p.runtime) {
+    if !edge_case || is_legal(p.p, m) {
         movelist.push(m);
     }
 }
@@ -595,12 +577,11 @@ pub struct AugmentedPos<'a> {
     occupied: PlayerStorage<Bitboard<GenericBB>>,
     attacked: PlayerStorage<Bitboard<GenericBB>>,
     pinned: Bitboard<GenericBB>,
-    runtime: &'a Lookup,
 }
 
 impl<'a> AugmentedPos<'a> {
     // would return an error if the position is illegal already
-    pub fn list_issues(p: &'a Position, r: &'a Lookup) -> Result<MoveVec, ()> {
+    pub fn list_issues(p: &'a Position) -> Result<MoveVec, ()> {
         let turn = Player::from_usize(p.half_move_count % 2);
         let mut a = AugmentedPos {
             p: p,
@@ -608,7 +589,6 @@ impl<'a> AugmentedPos<'a> {
             attacked: PlayerStorage::from([SpecialBB::Empty.declass(), SpecialBB::Empty.declass()]),
             pinned: SpecialBB::Empty.declass(),
             turn: turn,
-            runtime: r,
         };
         a.compute_occupied();
         a.compute_pinned();
@@ -616,7 +596,7 @@ impl<'a> AugmentedPos<'a> {
         a.compute_attacked_gen_moves()
     }
 
-    pub fn check_legal(p: &Position, r: &Lookup) -> Result<(), ()> {
+    pub fn check_legal(p: &Position) -> Result<(), ()> {
         let turn = Player::from_usize(p.half_move_count % 2);
         let mut a = AugmentedPos {
             p: p,
@@ -624,14 +604,13 @@ impl<'a> AugmentedPos<'a> {
             attacked: PlayerStorage::from([SpecialBB::Empty.declass(), SpecialBB::Empty.declass()]),
             pinned: SpecialBB::Empty.declass(),
             turn: turn,
-            runtime: r,
         };
 
         a.compute_occupied();
 
         let blockers = a.occupied[Player::White] | a.occupied[Player::Black];
 
-        a.attacked[a.turn] = a.p.pos[a.turn].attacks(a.turn, blockers, a.runtime);
+        a.attacked[a.turn] = a.p.pos[a.turn].attacks(a.turn, blockers);
         if a.p.pos[a.turn.other()][Piece::King] & a.attacked[a.turn] != SpecialBB::Empty.declass() {
             return Err(());
         } else {
@@ -666,14 +645,14 @@ impl<'a> AugmentedPos<'a> {
         let blockers = self.occupied[Player::White] | self.occupied[Player::Black];
 
         self.attacked[self.turn.other()] =
-            self.p.pos[self.turn.other()].attacks(self.turn.other(), blockers, self.runtime);
+            self.p.pos[self.turn.other()].attacks(self.turn.other(), blockers);
 
         // generate my attacks and my moves at the same time
         self.attacked[self.turn] = {
             let mut attacked = SpecialBB::Empty.declass();
             let mask = !self.occupied[self.turn];
             for sq in self.p.pos[self.turn][Piece::Bishop] {
-                let dests = self.runtime.generate_bishops(sq.declass(), blockers);
+                let dests = STATIC_ATTACKS.generate_bishops(sq.declass(), blockers);
                 generate_non_pawn_move_data(
                     self,
                     &Piece::Bishop,
@@ -684,7 +663,7 @@ impl<'a> AugmentedPos<'a> {
                 attacked = attacked | dests;
             }
             for sq in self.p.pos[self.turn][Piece::Queen] {
-                let dests = self.runtime.generate_queens(sq.declass(), blockers);
+                let dests = STATIC_ATTACKS.generate_queens(sq.declass(), blockers);
                 generate_non_pawn_move_data(
                     self,
                     &Piece::Queen,
@@ -695,7 +674,7 @@ impl<'a> AugmentedPos<'a> {
                 attacked = attacked | dests;
             }
             for sq in self.p.pos[self.turn][Piece::Rook] {
-                let dests = self.runtime.generate_rooks(sq.declass(), blockers);
+                let dests = STATIC_ATTACKS.generate_rooks(sq.declass(), blockers);
                 generate_non_pawn_move_data(
                     self,
                     &Piece::Rook,
@@ -706,7 +685,7 @@ impl<'a> AugmentedPos<'a> {
                 attacked = attacked | dests;
             }
             for sq in self.p.pos[self.turn][Piece::Knight] {
-                let dests = self.runtime.generate_knights(sq.declass());
+                let dests = STATIC_ATTACKS.generate_knights(sq.declass());
                 generate_non_pawn_move_data(
                     self,
                     &Piece::Knight,
@@ -761,17 +740,16 @@ impl<'a> AugmentedPos<'a> {
         let king = self.p.pos[opp.other()][Piece::King];
 
         let pseudo_blockers = self.occupied[opp]; // & !(en_passant_pawns));
-        let sliding_attacks = self.runtime.generate_bishops(
+        let sliding_attacks = STATIC_ATTACKS.generate_bishops(
             self.p.pos[opp][Piece::Bishop] | self.p.pos[opp][Piece::Queen],
             pseudo_blockers,
-        ) | self.runtime.generate_rooks(
+        ) | STATIC_ATTACKS.generate_rooks(
             self.p.pos[opp][Piece::Rook] | self.p.pos[opp][Piece::Queen],
             pseudo_blockers,
         );
         self.pinned = if sliding_attacks & king != SpecialBB::Empty.declass() {
             // there are pins coming from the king pos, extract them by reversing propag
-            let trajectories = self
-                .runtime
+            let trajectories = STATIC_ATTACKS
                 .generate_queens(king, self.occupied[opp] | self.occupied[opp.other()]);
             trajectories & sliding_attacks | king
         } else {
@@ -784,12 +762,12 @@ impl<'a> AugmentedPos<'a> {
     }
     // is opponent already in check
     // this could only come from a pin that is broken
-    pub fn is_illegal(p: &Position, r: &Lookup) -> bool {
+    pub fn is_illegal(p: &Position) -> bool {
         let blockers = p.pos[Player::White].occupied() | p.pos[Player::Black].occupied();
-        let relevant_attacks = r.generate_bishops(
+        let relevant_attacks = STATIC_ATTACKS.generate_bishops(
             p.pos[p.turn()][Piece::Bishop] | p.pos[p.turn()][Piece::Queen],
             blockers,
-        ) | r.generate_rooks(
+        ) | STATIC_ATTACKS.generate_rooks(
             p.pos[p.turn()][Piece::Rook] | p.pos[p.turn()][Piece::Queen],
             blockers,
         ) | dyn_attacks::generate_knights(p.pos[p.turn()][Piece::Knight])

@@ -3,7 +3,7 @@
 #![feature(ptr_as_ref_unchecked)]
 #![feature(test)]
 
-use position::movegen;
+use uci::{UciParser, UciShell};
 pub mod eval;
 pub mod position;
 pub mod tt; // transposition tables
@@ -12,10 +12,9 @@ mod uci;
 fn main() {
     //println!("Zobrist key {:?}", position::zobrist::random_zobrist_seed());
 
-    let pregen_attacks = movegen::static_attacks::Lookup::init();
     let mut args: Vec<_> = std::env::args().collect();
 
-    let mut interface = uci::UciInterface::create(&pregen_attacks);
+    let mut interface = uci::UciShell::new();
 
     // either single command or multiple command
     if args.len() > 2 {
@@ -26,7 +25,7 @@ fn main() {
             command += " ";
         }
         println!("Running command {:?}", command);
-        interface.runcommand(&command);
+        interface.runcommand(UciShell::parse(command).unwrap());
     } else {
         interface.run();
     }

@@ -1,4 +1,5 @@
 use std::random;
+use std::sync::LazyLock;
 use std::time::{Duration, Instant};
 
 use super::UciNotation;
@@ -16,6 +17,8 @@ pub struct Lookup {
     at_bishop: Box<AttackTable<TS_BISHOP>>,
     at_knights: Box<[Bitboard<GenericBB>; 64]>,
 }
+
+pub static STATIC_ATTACKS: LazyLock<Lookup> = LazyLock::new(|| Lookup::init());
 
 impl Lookup {
     pub fn init() -> Self {
@@ -497,9 +500,20 @@ mod tests {
     extern crate test;
     use test::Bencher;
 
+    use crate::position::bitboard::{Bitboard, GenericBB};
+
     use super::super::bitboard::ToBB;
     #[bench]
-    fn attack_queen_all_squares_static(b: &mut Bencher) {
+    fn reference_random_square_random_blockers(b: &mut Bencher) {
+        b.iter(|| {
+            Bitboard(GenericBB(
+                1u64 << ((63 as usize) & std::random::random::<usize>()),
+            )) ^ Bitboard(GenericBB(std::random::random::<u64>()))
+        });
+    }
+
+    #[bench]
+    fn attack_queen_static_bench_on_random_square(b: &mut Bencher) {
         let l = super::Lookup::init();
         // test attacks without opposition
         let blockers = super::SpecialBB::Empty.declass();
@@ -518,19 +532,25 @@ mod tests {
             )
         }
 
-        let blockers = super::SpecialBB::Empty.declass();
-        for sq in super::SpecialBB::Full.declass() {
-            let sg = sq.declass();
-            b.iter(|| l.generate_rooks(sg, blockers));
-        }
+        b.iter(|| {
+            l.generate_queens(
+                Bitboard(GenericBB(
+                    1u64 << ((63 as usize) & std::random::random::<usize>()),
+                )),
+                Bitboard(GenericBB(std::random::random::<u64>())),
+            )
+        });
     }
 
     #[bench]
-    fn attack_queen_all_squares_dyn(b: &mut Bencher) {
-        let blockers = super::SpecialBB::Empty.declass();
-        for sq in super::SpecialBB::Full.declass() {
-            let sg = sq.declass();
-            b.iter(|| super::dyn_attacks::generate_queens(sg, blockers));
-        }
+    fn attack_queen_dynamic_bench_on_random_square(b: &mut Bencher) {
+        b.iter(|| {
+            super::dyn_attacks::generate_queens(
+                Bitboard(GenericBB(
+                    1u64 << ((63 as usize) & std::random::random::<usize>()),
+                )),
+                Bitboard(GenericBB(std::random::random::<u64>())),
+            )
+        });
     }
 }
