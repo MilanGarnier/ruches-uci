@@ -275,6 +275,7 @@ impl<I: Read, O: Write> UciShell<I, O> {
                 // parse fen | starting pos
                 let mut lock = self.position.lock();
                 let pos = lock.as_mut().unwrap();
+                pos.clone_from(&p);
                 match m {
                     Some(mv) => {
                         for m in mv {
