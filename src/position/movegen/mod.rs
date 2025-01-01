@@ -4,8 +4,6 @@ use customvec::{FastVec, MoveVec};
 use dests::generate_next_en_passant_data;
 use localvec as customvec;
 
-use static_attacks::STATIC_ATTACKS;
-
 use super::bitboard::{self, Bitboard, File, FromBB, GenericBB, Rank, SpecialBB, Square, ToBB};
 use super::castle::{self, CASTLES_KEEP_UNCHANGED, Castle, CastleData};
 use super::piece::Piece;
@@ -13,11 +11,10 @@ use super::{Player, PlayerStorage};
 
 use super::{PieceSet, Position, UciNotation};
 
+pub mod attacks;
 mod dests;
-pub mod dyn_attacks;
 // mod heapvec;
 mod localvec;
-pub mod static_attacks;
 
 #[derive(Copy, Clone, Debug)]
 pub struct Change {
@@ -535,7 +532,7 @@ pub fn generate_pawn_atmove(
 fn generate_pawn_move_data(meta: &AugmentedPos, src: &Bitboard<Square>, movelist: &mut MoveVec) {
     let blockers = meta.occupied[Player::White] | meta.occupied[Player::Black];
     let captures = meta.p.en_passant | meta.occupied[meta.opponent()];
-    let dests = (dyn_attacks::generate_pawns(src.declass(), meta.turn) & captures)
+    let dests = (attacks::generate_pawns(src.declass(), meta.turn) & captures)
         | dests::pawn_move_up_nocap(*src, meta.player(), blockers);
 
     for sq in dests {
@@ -652,7 +649,7 @@ impl<'a> AugmentedPos<'a> {
             let mut attacked = SpecialBB::Empty.declass();
             let mask = !self.occupied[self.turn];
             for sq in self.p.pos[self.turn][Piece::Bishop] {
-                let dests = STATIC_ATTACKS.generate_bishops(sq.declass(), blockers);
+                let dests = attacks::generate_bishops(sq.declass(), blockers);
                 generate_non_pawn_move_data(
                     self,
                     &Piece::Bishop,
@@ -663,7 +660,7 @@ impl<'a> AugmentedPos<'a> {
                 attacked = attacked | dests;
             }
             for sq in self.p.pos[self.turn][Piece::Queen] {
-                let dests = STATIC_ATTACKS.generate_queens(sq.declass(), blockers);
+                let dests = attacks::generate_queens(sq.declass(), blockers);
                 generate_non_pawn_move_data(
                     self,
                     &Piece::Queen,
@@ -674,7 +671,7 @@ impl<'a> AugmentedPos<'a> {
                 attacked = attacked | dests;
             }
             for sq in self.p.pos[self.turn][Piece::Rook] {
-                let dests = STATIC_ATTACKS.generate_rooks(sq.declass(), blockers);
+                let dests = attacks::generate_rooks(sq.declass(), blockers);
                 generate_non_pawn_move_data(
                     self,
                     &Piece::Rook,
@@ -685,7 +682,7 @@ impl<'a> AugmentedPos<'a> {
                 attacked = attacked | dests;
             }
             for sq in self.p.pos[self.turn][Piece::Knight] {
-                let dests = STATIC_ATTACKS.generate_knights(sq.declass());
+                let dests = attacks::generate_knights(sq.declass());
                 generate_non_pawn_move_data(
                     self,
                     &Piece::Knight,
@@ -695,8 +692,8 @@ impl<'a> AugmentedPos<'a> {
                 );
                 attacked = attacked | dests;
             }
-            attacked = attacked
-                | dyn_attacks::generate_pawns(self.p.pos[self.turn][Piece::Pawn], self.turn);
+            attacked =
+                attacked | attacks::generate_pawns(self.p.pos[self.turn][Piece::Pawn], self.turn);
             attacked
         };
         if self.p.pos[self.turn.other()][Piece::King] & self.attacked[self.turn]
@@ -740,17 +737,17 @@ impl<'a> AugmentedPos<'a> {
         let king = self.p.pos[opp.other()][Piece::King];
 
         let pseudo_blockers = self.occupied[opp]; // & !(en_passant_pawns));
-        let sliding_attacks = STATIC_ATTACKS.generate_bishops(
+        let sliding_attacks = attacks::generate_bishops(
             self.p.pos[opp][Piece::Bishop] | self.p.pos[opp][Piece::Queen],
             pseudo_blockers,
-        ) | STATIC_ATTACKS.generate_rooks(
+        ) | attacks::generate_rooks(
             self.p.pos[opp][Piece::Rook] | self.p.pos[opp][Piece::Queen],
             pseudo_blockers,
         );
         self.pinned = if sliding_attacks & king != SpecialBB::Empty.declass() {
             // there are pins coming from the king pos, extract them by reversing propag
-            let trajectories = STATIC_ATTACKS
-                .generate_queens(king, self.occupied[opp] | self.occupied[opp.other()]);
+            let trajectories =
+                attacks::generate_queens(king, self.occupied[opp] | self.occupied[opp.other()]);
             trajectories & sliding_attacks | king
         } else {
             SpecialBB::Empty.declass()
@@ -764,14 +761,14 @@ impl<'a> AugmentedPos<'a> {
     // this could only come from a pin that is broken
     pub fn is_illegal(p: &Position) -> bool {
         let blockers = p.pos[Player::White].occupied() | p.pos[Player::Black].occupied();
-        let relevant_attacks = STATIC_ATTACKS.generate_bishops(
+        let relevant_attacks = attacks::generate_bishops(
             p.pos[p.turn()][Piece::Bishop] | p.pos[p.turn()][Piece::Queen],
             blockers,
-        ) | STATIC_ATTACKS.generate_rooks(
+        ) | attacks::generate_rooks(
             p.pos[p.turn()][Piece::Rook] | p.pos[p.turn()][Piece::Queen],
             blockers,
-        ) | dyn_attacks::generate_knights(p.pos[p.turn()][Piece::Knight])
-            | dyn_attacks::generate_pawns(p.pos[p.turn()][Piece::Pawn], p.turn());
+        ) | attacks::generate_knights(p.pos[p.turn()][Piece::Knight])
+            | attacks::generate_pawns(p.pos[p.turn()][Piece::Pawn], p.turn());
         let is_king_attacked =
             p.pos[p.turn().other()][Piece::King] & relevant_attacks != SpecialBB::Empty.declass();
         /*#[cfg(debug_assertions)]

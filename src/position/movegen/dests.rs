@@ -5,8 +5,8 @@ use super::bitboard::Square;
 use super::bitboard::ToBB;
 
 use super::AugmentedPos;
+use super::attacks; // goal is to get rid of it
 use super::bitboard::{Bitboard as BB, Rank};
-use super::dyn_attacks; // goal is to get rid of it
 use super::{Piece, Player};
 
 pub fn generate_king_dests(src: BB<Square>, meta: &AugmentedPos) -> BB<GenericBB> {
@@ -16,7 +16,7 @@ pub fn generate_king_dests(src: BB<Square>, meta: &AugmentedPos) -> BB<GenericBB
     // squares that arent attacked by opponent, and not occupied by my own pieces
     let free_sq_for_king = !meta.attacked[player.other()] & !meta.occupied[player];
 
-    dyn_attacks::generate_king(king) & free_sq_for_king
+    attacks::generate_king(king) & free_sq_for_king
 }
 
 // mask to know when to trigger en passant => check [(src | dest) & mask == (src | dest)]

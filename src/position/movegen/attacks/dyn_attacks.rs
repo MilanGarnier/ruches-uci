@@ -1,6 +1,6 @@
-use super::Bitboard;
-use super::Player;
-use super::bitboard::{GenericBB, SpecialBB, Square, ToBB};
+use crate::position::Bitboard;
+use crate::position::Player;
+use crate::position::bitboard::{GenericBB, SpecialBB, Square, ToBB};
 
 // TODO: could replace with an map
 pub fn generate_king(king: Bitboard<Square>) -> Bitboard<GenericBB> {

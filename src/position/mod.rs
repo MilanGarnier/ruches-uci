@@ -9,7 +9,6 @@ pub trait Parsing {
 use bitboard::{BBSquare, Bitboard, File, FromBB, GenericBB, Rank, SpecialBB, Square, ToBB};
 
 use castle::{CASTLES_ALL_ALLOWED, CASTLES_ALL_FORBIDDEN, Castle, CastleData};
-use movegen::static_attacks::STATIC_ATTACKS;
 use movegen::{
     AtomicMove, AugmentedPos, CaptureData, Change, Move, PartialMove, Promotion, StandardMove,
 };
@@ -82,11 +81,11 @@ impl PieceSet {
         self.pawns | self.bishops | self.king | self.knights | self.queens | self.rooks
     }
     fn attacks(&self, player: Player, blockers: Bitboard<GenericBB>) -> Bitboard<GenericBB> {
-        movegen::dyn_attacks::generate_pawns(self[Piece::Pawn], player)
-            | movegen::dyn_attacks::generate_knights(self[Piece::Knight])
-            | STATIC_ATTACKS.generate_bishops(self[Piece::Bishop] | self[Piece::Queen], blockers)
-            | STATIC_ATTACKS.generate_rooks(self[Piece::Rook] | self[Piece::Queen], blockers)
-            | movegen::dyn_attacks::generate_king(Square::from_bb(&self[Piece::King]).unwrap())
+        movegen::attacks::generate_pawns(self[Piece::Pawn], player)
+            | movegen::attacks::generate_knights(self[Piece::Knight])
+            | movegen::attacks::generate_bishops(self[Piece::Bishop] | self[Piece::Queen], blockers)
+            | movegen::attacks::generate_rooks(self[Piece::Rook] | self[Piece::Queen], blockers)
+            | movegen::attacks::generate_king(Square::from_bb(&self[Piece::King]).unwrap())
     }
 }
 
@@ -344,7 +343,7 @@ impl Position {
         }
         Ok(None)
     }
-
+    #[cfg(feature = "perft")]
     pub fn perft_top(&mut self, depth: usize) -> usize {
         let mut cache = match depth {
             0..=3 => PerftCache::new(1),
@@ -677,6 +676,8 @@ fn basic_perft() {
 mod tests {
     extern crate test;
     use test::Bencher;
+
+    #[cfg(feature = "perft")]
     #[bench]
     fn perft_startpos_3(b: &mut Bencher) {
         let mut a = super::Position::startingpos();

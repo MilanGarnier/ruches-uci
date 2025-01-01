@@ -2,8 +2,8 @@ use std::random;
 use std::sync::LazyLock;
 use std::time::{Duration, Instant};
 
-use super::UciNotation;
-use super::bitboard::{Bitboard, File, FromBB, GenericBB, Rank, SpecialBB, Square, ToBB};
+use crate::position::UciNotation;
+use crate::position::bitboard::{Bitboard, File, FromBB, GenericBB, Rank, SpecialBB, Square, ToBB};
 
 use super::dyn_attacks;
 
@@ -56,66 +56,63 @@ impl Lookup {
 
         baseline
     }
+}
 
-    pub fn generate_knights(&self, bb: Bitboard<GenericBB>) -> Bitboard<GenericBB> {
-        let mut b = Bitboard(GenericBB(0));
-        for sq in bb {
-            b = b | self.at_knights[sq.to_index() as usize];
-        }
-        debug_assert_eq!(b, dyn_attacks::generate_knights(bb), "src : {:?}", bb);
-        b
+pub fn generate_knights(bb: Bitboard<GenericBB>) -> Bitboard<GenericBB> {
+    let mut b = Bitboard(GenericBB(0));
+    for sq in bb {
+        b = b | STATIC_ATTACKS.at_knights[sq.to_index() as usize];
+    }
+    debug_assert_eq!(b, dyn_attacks::generate_knights(bb), "src : {:?}", bb);
+    b
+}
+
+pub fn generate_bishops(
+    p: Bitboard<GenericBB>,
+    blockers: Bitboard<GenericBB>,
+) -> Bitboard<GenericBB> {
+    let mut dests = SpecialBB::Empty.declass(); // TODO: remove p without bizarre behaviour
+    for s in p {
+        dests = dests | (STATIC_ATTACKS.at_bishop[(s, blockers)] & !s)
+    }
+    debug_assert_eq!(
+        dests,
+        dyn_attacks::generate_bishops(p, blockers),
+        "Bishop in {} with {} as blockers gave different outcomes : {}, {}",
+        p.to_uci(),
+        (blockers).to_uci(),
+        dests.to_uci(),
+        dyn_attacks::generate_bishops(p, blockers).to_uci()
+    );
+    dests
+}
+
+pub fn generate_rooks(
+    p: Bitboard<GenericBB>,
+    blockers: Bitboard<GenericBB>,
+) -> Bitboard<GenericBB> {
+    let mut dests = SpecialBB::Empty.declass();
+    for s in p {
+        dests = dests | (STATIC_ATTACKS.at_rook[(s, blockers)] ^ s)
     }
 
-    pub fn generate_bishops(
-        &self,
-        p: Bitboard<GenericBB>,
-        blockers: Bitboard<GenericBB>,
-    ) -> Bitboard<GenericBB> {
-        let mut dests = SpecialBB::Empty.declass(); // TODO: remove p without bizarre behaviour
-        for s in p {
-            dests = dests | (self.at_bishop[(s, blockers)] & !s)
-        }
-        debug_assert_eq!(
-            dests,
-            dyn_attacks::generate_bishops(p, blockers),
-            "Bishop in {} with {} as blockers gave different outcomes : {}, {}",
-            p.to_uci(),
-            (blockers).to_uci(),
-            dests.to_uci(),
-            dyn_attacks::generate_bishops(p, blockers).to_uci()
-        );
-        dests
-    }
+    debug_assert_eq!(
+        dests,
+        dyn_attacks::generate_rooks(p, blockers),
+        "Rook in {} with {} as blockers gave different outcomes : {}, {}",
+        p.to_uci(),
+        (blockers).to_uci(),
+        dests.to_uci(),
+        dyn_attacks::generate_rooks(p, blockers).to_uci()
+    );
+    dests
+}
 
-    pub fn generate_rooks(
-        &self,
-        p: Bitboard<GenericBB>,
-        blockers: Bitboard<GenericBB>,
-    ) -> Bitboard<GenericBB> {
-        let mut dests = SpecialBB::Empty.declass();
-        for s in p {
-            dests = dests | (self.at_rook[(s, blockers)] ^ s)
-        }
-
-        debug_assert_eq!(
-            dests,
-            dyn_attacks::generate_rooks(p, blockers),
-            "Rook in {} with {} as blockers gave different outcomes : {}, {}",
-            p.to_uci(),
-            (blockers).to_uci(),
-            dests.to_uci(),
-            dyn_attacks::generate_rooks(p, blockers).to_uci()
-        );
-        dests
-    }
-
-    pub fn generate_queens(
-        &self,
-        p: Bitboard<GenericBB>,
-        blockers: Bitboard<GenericBB>,
-    ) -> Bitboard<GenericBB> {
-        self.generate_bishops(p, blockers) | self.generate_rooks(p, blockers)
-    }
+pub fn generate_queens(
+    p: Bitboard<GenericBB>,
+    blockers: Bitboard<GenericBB>,
+) -> Bitboard<GenericBB> {
+    generate_bishops(p, blockers) | generate_rooks(p, blockers)
 }
 
 #[derive(Clone, Debug, Copy)]
@@ -500,9 +497,8 @@ mod tests {
     extern crate test;
     use test::Bencher;
 
-    use crate::position::bitboard::{Bitboard, GenericBB};
+    use crate::position::bitboard::{Bitboard, GenericBB, ToBB};
 
-    use super::super::bitboard::ToBB;
     #[bench]
     fn reference_random_square_random_blockers(b: &mut Bencher) {
         b.iter(|| {
@@ -514,26 +510,25 @@ mod tests {
 
     #[bench]
     fn attack_queen_static_bench_on_random_square(b: &mut Bencher) {
-        let l = super::Lookup::init();
         // test attacks without opposition
         let blockers = super::SpecialBB::Empty.declass();
         for sq in super::SpecialBB::Full.declass() {
             assert_eq!(
                 super::dyn_attacks::generate_bishops(sq.declass(), blockers),
-                l.generate_bishops(sq.declass(), blockers)
+                super::generate_bishops(sq.declass(), blockers)
             );
             assert_eq!(
                 super::dyn_attacks::generate_rooks(sq.declass(), blockers),
-                l.generate_rooks(sq.declass(), blockers)
+                super::generate_rooks(sq.declass(), blockers)
             );
             assert_eq!(
                 super::dyn_attacks::generate_queens(sq.declass(), blockers),
-                l.generate_queens(sq.declass(), blockers)
+                super::generate_queens(sq.declass(), blockers)
             )
         }
 
         b.iter(|| {
-            l.generate_queens(
+            super::generate_queens(
                 Bitboard(GenericBB(
                     1u64 << ((63 as usize) & std::random::random::<usize>()),
                 )),

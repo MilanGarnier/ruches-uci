@@ -4,6 +4,13 @@ version = "0.1.0"
 edition = "2024"
 authors = ["Milan Garnier"]
 
+[features]
+default = ["perft", "static_attacks"]
+
+perft = []
+
+static_attacks = []
+
 [dependencies]
 
 futures = "0.3"

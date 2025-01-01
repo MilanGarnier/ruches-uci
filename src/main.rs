@@ -1,20 +1,22 @@
 #![feature(random)]
-#![feature(once_cell_get_mut)]
 #![feature(ptr_as_ref_unchecked)]
 #![feature(test)]
+#![feature(async_closure)]
 
-use uci::{UciParser, UciShell};
+use std::io::{stdin, stdout};
+
 pub mod eval;
 pub mod position;
 pub mod tt; // transposition tables
 mod uci;
 
-fn main() {
+#[tokio::main(flavor = "current_thread")]
+async fn main() {
     //println!("Zobrist key {:?}", position::zobrist::random_zobrist_seed());
 
     let mut args: Vec<_> = std::env::args().collect();
 
-    let mut interface = uci::UciShell::new();
+    let mut interface = uci::UciShell::new(stdin(), stdout());
 
     // either single command or multiple command
     if args.len() > 2 {
@@ -25,9 +27,9 @@ fn main() {
             command += " ";
         }
         println!("Running command {:?}", command);
-        interface.runcommand(UciShell::parse(command).unwrap()).unwrap();
+        interface.runcommand(uci::parse(command).unwrap()).unwrap();
     } else {
-        interface.run();
+        interface.run().await;
     }
 
     //println!("Running unit tests");
