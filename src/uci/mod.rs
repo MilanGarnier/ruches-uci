@@ -1,10 +1,16 @@
 use std::{
     fmt::Display,
-    io::{Read, Write, stdin},
+    io::{Stdout, Write, stdin, stdout},
+    marker::PhantomData,
+    ops::{Deref, DerefMut},
     sync::{Arc, Mutex},
+    time::Duration,
 };
 
-use crate::position::Position;
+use futures::channel::oneshot::{Sender, channel};
+use tokio::task::JoinHandle;
+
+use crate::{eval::MaterialBalance, position::Position, search::Search};
 
 const BUILD_NAME: &str = env!("CARGO_PKG_NAME");
 const BUILD_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -12,31 +18,31 @@ const BUILD_AUTHORS: &str = env!("CARGO_PKG_AUTHORS");
 // const BUILD_ABOUT: &str = "Simple rust chess engine that will get better";
 // if accessible, you know the engine is in one of these states
 
-pub struct UciShell<I, O>
-where
-    I: Read,
-    O: Write,
-{
-    s_in: I,
-    s_out: Arc<Mutex<O>>,
+pub struct UciOut<O: Write> {
+    _a: PhantomData<O>,
+    debug: bool,
+}
 
+pub struct UciShell {
     // state will be locked during critical commands
-    worker: Option<tokio::task::JoinHandle<bool>>,
+    runtime: Arc<Mutex<tokio::runtime::Runtime>>,
+    worker: Arc<Mutex<Option<(tokio::task::JoinHandle<()>, Sender<()>)>>>,
     debug: bool,
     position: Arc<Mutex<Position>>, // TODO add here internal configuration
 }
 
-pub trait UciParser {
-    fn send_response(&self, r: UciResponse) -> Result<(), std::io::Error>;
+pub trait UciOutputStream: Send {
+    fn send_response<T: Display>(r: T) -> Result<(), std::io::Error>;
+    fn send_debug<T: Display>(_r: T) -> Result<(), std::io::Error>;
 }
 
-impl<I: Read, O: Write> UciShell<I, O> {
-    pub fn new(i: I, o: O) -> Self {
-        Self {
-            s_in: i,
-            s_out: Arc::new(Mutex::new(o)),
+//unsafe impl Sync for UciShell {}
 
-            worker: None,
+impl UciShell {
+    pub fn new() -> Self {
+        Self {
+            runtime: Arc::new(Mutex::new(tokio::runtime::Runtime::new().unwrap())),
+            worker: Arc::new(Mutex::new(None)),
             debug: true,
             position: Arc::new(Mutex::new(Position::startingpos())),
         }
@@ -50,7 +56,7 @@ pub fn parse(line: String) -> Result<ParsedCommand, ()> {
         Some(x) => match x {
             "uci" => Ok(ParsedCommand::Uci),
             "isready" => Ok(ParsedCommand::IsReady),
-            "printboard" => Ok(ParsedCommand::PrintBoard),
+            "d" => Ok(ParsedCommand::PrintBoard),
 
             "position" => Ok(ParsedCommand::Position(
                 // parse fen | starting pos
@@ -92,6 +98,7 @@ pub fn parse(line: String) -> Result<ParsedCommand, ()> {
                     }
                     _ => return Err(()), // self.debug_msg("Missing depth");
                 }),
+                Some("infinite") => GoCommand::Infinite,
                 _ => todo!(),
             })),
 
@@ -103,15 +110,34 @@ pub fn parse(line: String) -> Result<ParsedCommand, ()> {
     }
 }
 
-impl<I: Read, O: Write> UciParser for UciShell<I, O> {
-    fn send_response(&self, r: UciResponse) -> Result<(), std::io::Error> {
-        let mut out_mut = self.s_out.lock().unwrap();
-        if let UciResponse::Debug(_) = r {
+impl UciOutputStream for UciOut<std::io::Stdout> {
+    fn send_response<T: Display>(r: T) -> Result<(), std::io::Error> {
+        let mut out_mut = stdout();
+        /*if let UciResponse::Debug(_) = r {
             if self.debug == false {
                 return Ok(());
             }
+        }*/
+        write!(out_mut, "{r}")
+    }
+
+    fn send_debug<T: Display>(r: T) -> Result<(), std::io::Error> {
+        if cfg!(debug_assertions) {
+            Self::send_response(r)?
         }
-        writeln!(out_mut, "{r}")
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+pub struct NullUciStream {}
+#[cfg(test)]
+impl UciOutputStream for NullUciStream {
+    fn send_response<T>(_r: T) -> Result<(), std::io::Error> {
+        Ok(())
+    }
+    fn send_debug<T: Display>(_r: T) -> Result<(), std::io::Error> {
+        Ok(())
     }
 }
 
@@ -129,6 +155,7 @@ pub enum ParsedCommand {
 pub enum GoCommand {
     #[cfg(feature = "perft")]
     Perft(usize),
+    Infinite,
 }
 enum UciOption {
     String {
@@ -155,25 +182,55 @@ impl Display for UciOption {
     }
 }
 
-pub enum UciResponse {
-    String(String),
-    Debug(String), //TODO : add more and never use println elsewhere
-    Id(&'static str, String),
+pub enum UciResponse<'a> {
+    Info(&'a str),
+    Raw(&'a str),
+    Debug(&'a str), //TODO : add more and never use println elsewhere
+    Id(&'a str, String),
     Ok,
     Ready,
-    Option { name: &'static str, o: UciOption },
+    Option { name: &'a str, o: UciOption },
 }
-impl Display for UciResponse {
+
+pub enum UciParam {
+    Info,
+    String(String),
+    Depth(usize),
+    ScoreCp(i32),
+    TimeMs(usize),
+    Variant(Vec<String>),
+}
+impl Display for UciParam {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Info => write!(f, "info"),
+            Self::String(s) => write!(f, "string {s}"),
+            Self::Depth(d) => write!(f, "depth {d}"),
+            Self::ScoreCp(s) => write!(f, "score cp {s}"),
+            Self::TimeMs(t) => write!(f, "time {t}"),
+            Self::Variant(v) => {
+                write!(f, "pv")?;
+                for m in v.into_iter().rev() {
+                    write!(f, " {m}")?
+                }
+                Ok(())
+            }
+        }
+    }
+}
+
+impl<'a> Display for UciResponse<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             UciResponse::Debug(x) => {
-                write!(f, "info string \"{}\"", x)
+                writeln!(f, "info string \"{}\"", x)
             }
-            UciResponse::String(x) => write!(f, "{}", x),
-            UciResponse::Id(x, y) => write!(f, "id {x} {y}"),
-            UciResponse::Ok => write!(f, "uciok"),
-            UciResponse::Ready => write!(f, "uciready"),
-            UciResponse::Option { name, o } => write!(f, "option name {name} {o}"),
+            UciResponse::Info(x) => writeln!(f, "info {}", x),
+            UciResponse::Raw(x) => writeln!(f, "{x}"),
+            UciResponse::Id(x, y) => writeln!(f, "id {x} {y}"),
+            UciResponse::Ok => writeln!(f, "uciok"),
+            UciResponse::Ready => writeln!(f, "uciready"),
+            UciResponse::Option { name, o } => writeln!(f, "option name {name} {o}"),
         }
     }
 }
@@ -183,73 +240,86 @@ pub enum CommandResult {
     Pending(tokio::task::JoinHandle<bool>),
 }
 
-impl<I: Read, O: Write> UciShell<I, O> {
+impl UciShell {
+    fn try_register(&self, j: JoinHandle<()>, sendstop: Sender<()>) -> Result<(), ()> {
+        let mut lock = match self.worker.lock() {
+            Ok(x) => x,
+            Err(_) => todo!("Failed unlocking"),
+        };
+        let channel = lock.deref_mut();
+        match channel {
+            Some(_) => todo!("Cannot register"),
+            None => (),
+        };
+        *channel = Some((j, sendstop));
+        Ok(())
+    }
+
     // blocking until quit is recieved
-    pub async fn run(&mut self) {
+    pub async fn run<Out: UciOutputStream + 'static>(&'static self) {
         loop {
             let mut line = String::new();
             stdin().read_line(&mut line).unwrap();
             let command = parse(line).unwrap();
             // .await.expect("Can't read line").unwrap();
 
-            let busy = match &self.worker {
-                Some(x) => {
-                    if x.is_finished() {
-                        self.worker = None;
-                        false
-                    } else {
-                        true
-                    }
-                }
-                None => false,
-            };
-
-            let res = self.runcommand(command);
+            let res = self.runcommand::<Out>(command).await;
 
             match res.unwrap() {
                 CommandResult::Finished(true) => return,
                 CommandResult::Finished(false) => (),
-                CommandResult::Pending(h) => {
-                    if busy {
-                        panic!("Cannot launch new search, busy")
-                    } else {
-                        self.worker = Some(h)
-                    } // TO remove
-                }
+                CommandResult::Pending(h) => {}
             }
         }
     }
 
     // returns response
-    pub fn runcommand(
-        &self,
+    pub async fn runcommand<Out: UciOutputStream + 'static>(
+        &'static self,
         c: ParsedCommand,
     ) -> Result<CommandResult, Box<dyn std::error::Error>> {
         match c {
-            ParsedCommand::Quit => return Ok(CommandResult::Finished(true)),
-            ParsedCommand::Stop => {
-                match &self.worker {
-                    Some(x) => {
-                        if x.is_finished() == false {
-                            x.abort();
-                            return Ok(CommandResult::Finished(true));
-                        }
-                    }
-                    None => (),
-                }
-                {}
-            }
             _ => (),
         }
         match c {
+            ParsedCommand::Quit => return Ok(CommandResult::Finished(true)),
+            ParsedCommand::Stop => {
+                let mut lock = match self.worker.lock() {
+                    Ok(x) => x,
+                    Err(_) => todo!("Failed unlocking"),
+                };
+                let channel = lock.deref_mut();
+                let channel = std::mem::replace(channel, None);
+                match channel {
+                    Some((x, sendstop)) => {
+                        sendstop.send(()).unwrap();
+                        tokio::select! {
+                            _ = tokio::time::sleep(Duration::from_millis(1000)) => {
+                                Out::send_debug("Timeout reached, kill previous command").unwrap();
+                            },
+                            _ = async { loop { if x.is_finished() {break;} else {tokio::time::sleep(Duration::from_millis(10)).await} } } => {
+                                Out::send_debug("Command ended peacefully").unwrap();
+                            },
+                        }
+                        if x.is_finished() == false {
+                            x.abort();
+                            return Ok(CommandResult::Finished(false));
+                        }
+                    }
+                    None => {
+                        Out::send_debug("No command to quit.").unwrap();
+                        ()
+                    }
+                }
+            }
             ParsedCommand::Uci => {
-                self.send_response(UciResponse::Id(
+                Out::send_response(UciResponse::Id(
                     "name",
                     format!("{} {}", BUILD_NAME, BUILD_VERSION),
                 ))?;
-                self.send_response(UciResponse::Id("authors", format!("{}", BUILD_AUTHORS)))?;
+                Out::send_response(UciResponse::Id("authors", format!("{}", BUILD_AUTHORS)))?;
                 // TODO: self.send_response(UciResponse:: &format!("option name UCI_EngineAbout {}", BUILD_ABOUT));
-                self.send_response(UciResponse::Option {
+                Out::send_response(UciResponse::Option {
                     name: "Threads",
                     o: UciOption::Spin {
                         default: 1,
@@ -258,17 +328,16 @@ impl<I: Read, O: Write> UciShell<I, O> {
                     },
                 })?;
 
-                self.send_response(UciResponse::Ok)?;
+                Out::send_response(UciResponse::Ok)?;
             }
 
             ParsedCommand::IsReady => {
                 // wait for running commands
-                self.send_response(UciResponse::Ready)?;
+                Out::send_response(UciResponse::Ready)?;
             }
 
             ParsedCommand::PrintBoard => {
-                println!("Current board state (for debug purposes only!)");
-                self.position.lock().unwrap().pretty_print();
+                //self.position.lock().unwrap().pretty_print(&h);
             }
 
             ParsedCommand::Position(p, m) => {
@@ -297,10 +366,23 @@ impl<I: Read, O: Write> UciShell<I, O> {
             ParsedCommand::Go(x) => match x {
                 #[cfg(feature = "perft")]
                 GoCommand::Perft(i) => {
-                    let c = self.position.lock().unwrap().perft_top(i);
-                    self.send_response(UciResponse::String("".to_string()))?;
-                    self.send_response(UciResponse::String(format!("Nodes searched : {}", c)))?;
-                    self.send_response(UciResponse::String("".to_string()))?;
+                    let c = self.position.lock().unwrap().perft_top::<Out>(i);
+                    Out::send_response(UciResponse::Raw(""))?;
+                    Out::send_response(UciResponse::Raw(
+                        format!("Nodes searched : {}", c).as_str(),
+                    ))?;
+                    Out::send_response(UciResponse::Raw(""))?;
+                }
+                GoCommand::Infinite => {
+                    let (sendstop, sigstop) = channel();
+                    let p = self.position.lock().unwrap().clone();
+                    let lock = self.runtime.lock().unwrap();
+                    let runtime = lock.deref();
+                    let t = runtime.spawn(crate::search::SearchDefault::infinite::<
+                        MaterialBalance,
+                        Out,
+                    >(sigstop, p));
+                    self.try_register(t, sendstop).unwrap();
                 }
             },
             _ => panic!("Should not be able to be here"),

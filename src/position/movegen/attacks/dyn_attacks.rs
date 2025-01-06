@@ -39,12 +39,6 @@ pub fn generate_knights(knights: Bitboard<GenericBB>) -> Bitboard<GenericBB> {
 
     let res = uul | uur | ddl | ddr | rru | rrd | llu | lld;
 
-    /*#[cfg(debug_assertions)]
-    println!(
-        "Generate knight attacks src = {:?} , res = {:?}",
-        knights, res
-    );*/
-
     res
 }
 
@@ -71,9 +65,6 @@ pub fn generate_rooks(
         }
     }
 
-    /*#[cfg(debug_assertions)]
-    println!("Generate rook attacks src = {:?} , res = {:?}", p, attacked);*/
-
     attacked
 }
 
@@ -96,6 +87,7 @@ pub fn generate_bishops(
     attacked
 }
 
+#[cfg(test)]
 pub fn generate_queens(
     p: Bitboard<GenericBB>,
     blockers: Bitboard<GenericBB>,

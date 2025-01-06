@@ -1,22 +1,19 @@
-pub mod s_count_material;
-use super::position;
+mod s_count_material;
 
+use std::fmt::{Display, Formatter};
+
+pub use s_count_material::MaterialBalance;
+
+use super::position;
 use super::position::{Player, Position, movegen::Move};
 
-struct MoveList(Vec<Move>);
-impl MoveList {
-    pub fn repr(&self) -> String {
-        let mut s: String = String::new();
-        for m in self.0.iter().rev() {
-            s += &m.uci();
-            s += " ";
-        }
-        s.pop();
-        s
-    }
-    pub fn new() -> Self {
-        MoveList { 0: Vec::new() }
-    }
+#[derive(Clone, Copy)]
+pub struct ApproxEval {
+    cp: i32,
+    depth: usize,
+}
+impl ApproxEval {
+    pub const EQUAL: Self = ApproxEval { cp: 0, depth: 0 };
 }
 
 #[derive(Clone, Copy)]
@@ -24,6 +21,40 @@ pub struct ForcedMate {
     p: Player,
     hmove_count: usize,
 }
+
+pub trait BasicEvaluation: Copy {
+    fn t() -> Self;
+    fn eval(p: &Position) -> Eval;
+}
+
+#[derive(Clone, Copy)]
+pub enum Eval {
+    Mate(ForcedMate),
+    Approx(ApproxEval),
+}
+
+pub struct EvalState {
+    pub eval: Eval,
+    pub pv: MoveList,
+}
+
+//// Internal defs/implementations
+
+struct MoveList(Vec<Move>);
+impl Default for MoveList {
+    fn default() -> Self {
+        MoveList { 0: Vec::new() }
+    }
+}
+impl Display for MoveList {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        for m in &self.0 {
+            write!(f, "{m} ")?;
+        }
+        Ok(())
+    }
+}
+
 impl ForcedMate {
     fn pick_best_for<'a>(p: Player, e0: &'a Self, e1: &'a Self) -> usize {
         if e0.p == e1.p {
@@ -54,25 +85,26 @@ impl ForcedMate {
             hmove_count: self.hmove_count + 1,
         }
     }
-    fn rich_repr(&self) -> String {
-        format!("#{}", (self.hmove_count + 1) / 2)
+}
+impl Display for ForcedMate {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), std::fmt::Error> {
+        match self.p {
+            Player::White => write!(f, "#{}", (self.hmove_count + 1) / 2),
+            Player::Black => write!(f, "#-{}", (self.hmove_count + 1) / 2),
+        }
     }
 }
-#[derive(Clone, Copy)]
-pub struct ApproxEval {
-    x: i32,
-    depth: usize,
-}
+
 impl ApproxEval {
     fn pick_best_for<'a>(p: Player, e0: &'a Self, e1: &'a Self) -> usize {
-        if e0.x == e1.x {
+        if e0.cp == e1.cp {
             // pick higher depth if equivalent
             match e0.depth < e1.depth {
                 true => 1,
                 false => 0,
             }
         } else {
-            match (e0.x < e1.x) ^ (p == Player::White) {
+            match (e0.cp < e1.cp) ^ (p == Player::White) {
                 true => 0,
                 false => 1,
             }
@@ -80,20 +112,19 @@ impl ApproxEval {
     }
     fn nest(&self) -> Self {
         Self {
-            x: self.x,
+            cp: self.cp,
             depth: self.depth + 1,
         }
     }
-    fn rich_repr(&self) -> String {
-        format!("{:+.2} (d={})", self.x, self.depth)
+}
+impl Display for ApproxEval {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let depth = self.depth;
+        let cp = self.cp; //TODO: add neg multiplier if engine is black side
+        write!(f, "depth {depth} score cp {cp}",)
     }
 }
 
-#[derive(Clone, Copy)]
-pub enum Eval {
-    Mate(ForcedMate),
-    Approx(ApproxEval),
-}
 impl Eval {
     // lost()
     pub fn m0(p: Player) -> Self {
@@ -103,7 +134,7 @@ impl Eval {
         })
     }
     pub fn draw() -> Self {
-        Eval::Approx(ApproxEval { x: 0, depth: 0 })
+        Eval::Approx(ApproxEval { cp: 0, depth: 0 })
     }
     fn pick_best_for(p: Player, e0: &Self, e1: &Self) -> usize {
         match (e0, e1) {
@@ -116,9 +147,7 @@ impl Eval {
                     1
                 }
             }
-            _ => {
-                1-Eval::pick_best_for(p, e1, e0)
-            }
+            _ => 1 - Eval::pick_best_for(p, e1, e0),
         }
     }
     fn nest(&self) -> Self {
@@ -127,18 +156,16 @@ impl Eval {
             Self::Mate(x) => Self::Mate(x.nest()),
         }
     }
-    fn rich_repr(&self) -> String {
+}
+impl Display for Eval {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Approx(x) => x.rich_repr(),
-            Self::Mate(x) => x.rich_repr(),
+            Self::Approx(x) => write!(f, "{x}"),
+            Self::Mate(x) => write!(f, "{x}"),
         }
     }
 }
 
-pub struct EvalState {
-    eval: Eval,
-    movelist: MoveList,
-}
 impl EvalState {
     pub fn pick_best_for(p: Player, e0: &Self, e1: &Self) -> usize {
         Eval::pick_best_for(p, &e0.eval, &e1.eval)
@@ -147,17 +174,20 @@ impl EvalState {
     // create the evalState for the current move, knowing that the eval is the best for player
     pub fn nest(&mut self, m: &Move) {
         self.eval = self.eval.nest();
-        self.movelist.0.push(*m);
+        self.pv.0.push(*m);
     }
-    pub fn new(e: &Eval) -> Self {
+    pub fn new(e: Eval) -> Self {
         Self {
-            eval: *e,
-            movelist: MoveList::new(),
+            eval: e,
+            pv: MoveList::default(),
         }
-    }
-    pub fn rich_repr(&self) -> String {
-        self.eval.rich_repr() + " [ " + &self.movelist.repr() + " ]"
     }
 }
 
-pub type EvalFun = dyn Fn(&Position) -> Eval;
+impl Display for EvalState {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let eval = &self.eval;
+        let pv = &self.pv;
+        write!(f, "{eval} {pv}",)
+    }
+}

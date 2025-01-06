@@ -1,11 +1,11 @@
-use super::Move;
+use crate::position::movegen::Move;
 use std::{fmt::Debug, mem::MaybeUninit, ops::Index};
 
 // Pre move generation
 // When computing attacks, stores them in a buffer so that they can be exploited later during move generation
 
 // if used for move generation
-pub type MoveVec = FastVec<60, Move>;
+pub type MoveVec = FastVec<64, Move>;
 
 // this buffer is used to save data
 pub struct FastVec<const N: usize, EntryType: Copy> {
@@ -17,10 +17,11 @@ pub struct FastVec<const N: usize, EntryType: Copy> {
 }
 impl<const N: usize, EntryType: Copy> FastVec<N, EntryType> {
     pub fn new() -> Self {
+        debug_assert_eq!(0, N & (N - 1), "FastVec size should be a power of 2");
         FastVec {
             stack: [MaybeUninit::uninit(); N],
-            counter: 0,
             heap: MaybeUninit::uninit(),
+            counter: 0,
             already_init_heap: false,
         }
     }

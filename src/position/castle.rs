@@ -93,23 +93,46 @@ impl Index<Castle> for CastleRights {
     }
 }
 
+// store castle data for both players
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub struct CastleData {
-    pub x: [CastleRights; Player::COUNT],
+    // x: [CastleRights; Player::COUNT], // former representation, not memory efficient
+    x: u8,
 }
 
 impl CastleData {
     pub fn stack_rev(&mut self, other: &CastleData) {
-        for (index, value) in other.x.iter().enumerate() {
+        /*for (index, value) in other.x.iter().enumerate() {
             self.x[index].stack(value);
-        }
+        }*/
+        self.x ^= other.x
     }
     pub fn fetch(&self, p: Player, c: Castle) -> bool {
-        self.x[p as usize][c]
+        let mask: u8 = 1 << (Castle::COUNT * (p as usize) + c as usize);
+        self.x & mask != 0
     }
+
+    pub fn set(&mut self, p: Player, c: Castle, val: bool) {
+        let mask: u8 = 1 << (Castle::COUNT * (p as usize) + c as usize);
+        if val {
+            self.x |= mask;
+        } else {
+            self.x &= !mask
+        }
+    }
+
+    pub fn copy_selection_player(&mut self, p: Player, val: &Self) {
+        let mask = (((1 as u8) << Castle::COUNT) - 1) << Castle::COUNT * (p as usize);
+        self.x = (self.x & !mask) | (mask & val.x);
+    }
+    pub fn copy_selection_precise(&mut self, p: Player, c: Castle, val: &Self) {
+        let mask: u8 = 1 << (Castle::COUNT * (p as usize) + c as usize);
+        self.x = (self.x & !mask) | (mask & val.x);
+    }
+
     pub fn hash(&self) -> usize {
         // TODO: improve speed
-        let mut h = 0;
+        /*let mut h = 0;
         for b in self.x {
             for b in b.x {
                 h *= 2;
@@ -118,19 +141,16 @@ impl CastleData {
                 }
             }
         }
-        h
+        h*/
+        self.x as usize * 98466746843 // magic value
     }
 }
 
 pub const CASTLE_ALLOWED_ONE_SIDE: CastleRights = CastleRights { x: [true, true] };
 pub const CASTLE_FORBIDDEN_ONE_SIDE: CastleRights = CastleRights { x: [false, false] };
 
-pub const CASTLES_ALL_ALLOWED: CastleData = CastleData {
-    x: [CASTLE_ALLOWED_ONE_SIDE, CASTLE_ALLOWED_ONE_SIDE],
-};
-pub const CASTLES_ALL_FORBIDDEN: CastleData = CastleData {
-    x: [CASTLE_FORBIDDEN_ONE_SIDE, CASTLE_FORBIDDEN_ONE_SIDE],
-};
+pub const CASTLES_ALL_ALLOWED: CastleData = CastleData { x: 0xF };
+pub const CASTLES_ALL_FORBIDDEN: CastleData = CastleData { x: 0x0 };
 
 pub const CASTLES_KEEP_UNCHANGED: CastleData = CASTLES_ALL_FORBIDDEN;
 

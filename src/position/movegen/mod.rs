@@ -1,10 +1,11 @@
-use std::fmt::Debug;
+use std::fmt::{Debug, Display};
 
-use customvec::{FastVec, MoveVec};
+use crate::localvec::{self, FastVec, MoveVec};
 use dests::generate_next_en_passant_data;
-use localvec as customvec;
 
-use super::bitboard::{self, Bitboard, File, FromBB, GenericBB, Rank, SpecialBB, Square, ToBB};
+use super::bitboard::{
+    self, Bitboard, File, FromBB, GenericBB, PackedSquare, Rank, SpecialBB, Square, ToBB,
+};
 use super::castle::{self, CASTLES_KEEP_UNCHANGED, Castle, CastleData};
 use super::piece::Piece;
 use super::{Player, PlayerStorage};
@@ -14,52 +15,94 @@ use super::{PieceSet, Position, UciNotation};
 pub mod attacks;
 mod dests;
 // mod heapvec;
-mod localvec;
 
 #[derive(Copy, Clone, Debug)]
 pub struct Change {
     p: Piece,
-    dest: Bitboard<Square>,
-    from: Bitboard<Square>,
+    cap: Option<Piece>,
+    dest: Bitboard<PackedSquare>,
+    from: Bitboard<PackedSquare>,
 }
 impl Change {
+    pub fn encode(
+        p: Piece,
+        cap: Option<Piece>,
+        dest: &Bitboard<Square>,
+        from: &Bitboard<Square>,
+    ) -> Self {
+        Self {
+            p,
+            cap,
+            from: Bitboard::<PackedSquare>::from(from),
+            dest: Bitboard::<PackedSquare>::from(dest),
+        }
+    }
     pub fn piece(&self) -> Piece {
         self.p
     }
     pub fn bitboard(&self) -> Bitboard<GenericBB> {
         self.dest | self.from
+        //Bitboard::<Square>::generic_from_index(self.dest)
+        //    | Bitboard::<Square>::generic_from_index(self.from)
+    }
+    pub fn dest(&self) -> Bitboard<Square> {
+        //Bitboard::<Square>::from_index(self.dest)
+        self.dest.into()
+    }
+
+    pub fn from(&self) -> Bitboard<Square> {
+        //Bitboard::<Square>::from_index(self.from)
+        self.from.into()
+    }
+    pub fn cap(&self) -> Option<Piece> {
+        self.cap
     }
 }
-impl UciNotation for Change {
-    fn to_uci(&self) -> String {
-        // let mut from = String::new();
-        /*for sq in self.from {
-            from += &sq.to_uci()
-        }*/
-        self.from.to_uci() + &self.dest.to_uci()
+impl Display for Change {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}{}",
+            self.from,
+            self.dest //Bitboard::<Square>::from_index(self.from),
+                      //Bitboard::<Square>::from_index(self.dest)
+        )
     }
 }
 
 #[derive(Copy, Clone, Debug)]
 pub struct Promotion {
-    pub new: Piece, // convert piece into
-    pub dest: Bitboard<Square>,
-    pub from: Bitboard<Square>,
+    data: Change, // simply a change but interpreted in a different way
 }
-impl UciNotation for Promotion {
-    fn to_uci(&self) -> String {
-        let repr = [['P', 'N', 'B', 'R', 'Q', 'K'], [
-            'p', 'n', 'b', 'r', 'q', 'k',
-        ]];
-        let mut s = self.from.to_uci();
-        let pl = match self.dest.declass() & Player::White.backrank() == SpecialBB::Empty.declass()
-        {
-            true => Player::White,
-            false => Player::Black,
-        };
-        s += &self.dest.to_uci();
-        s.push(repr[pl as usize][self.new as usize]);
-        s
+
+impl Promotion {
+    pub fn encode(
+        new_p: Piece,
+        cap: Option<Piece>,
+        dest: &Bitboard<Square>,
+        from: &Bitboard<Square>,
+    ) -> Self {
+        Self {
+            data: Change::encode(new_p, cap, dest, from),
+        }
+    }
+    pub fn new_piece(&self) -> Piece {
+        self.data.p
+    }
+    pub fn cap(&self) -> Option<Piece> {
+        self.data.cap
+    }
+    pub fn from(&self) -> Bitboard<Square> {
+        self.data.from()
+    }
+    pub fn dest(&self) -> Bitboard<Square> {
+        self.data.dest()
+    }
+}
+impl Display for Promotion {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let repr = ['p', 'n', 'b', 'r', 'q', 'k'];
+        write!(f, "{}{}", self.data, repr[self.new_piece() as usize])
     }
 }
 impl Promotion {}
@@ -72,51 +115,54 @@ pub enum AtomicMove {
 impl AtomicMove {
     pub fn does_affect(&self, piece: Piece) -> bool {
         match self {
-            AtomicMove::PiecePromoted(prom) => (piece == Piece::Pawn) || (piece == prom.new),
+            AtomicMove::PiecePromoted(prom) => {
+                (piece == Piece::Pawn) || (piece == prom.new_piece())
+            }
             AtomicMove::PieceMoved(mv) => mv.p == piece,
         }
     }
-    pub const fn dest(&self) -> Bitboard<Square> {
+    pub fn dest(&self) -> Bitboard<Square> {
         match self {
-            AtomicMove::PieceMoved(m) => m.dest,
-            AtomicMove::PiecePromoted(p) => p.dest,
+            AtomicMove::PieceMoved(m) => m.dest(),
+            AtomicMove::PiecePromoted(p) => p.dest(),
         }
     }
     pub fn src(&self) -> Bitboard<Square> {
         match self {
-            AtomicMove::PieceMoved(m) => m.from,
-            AtomicMove::PiecePromoted(p) => p.from,
+            AtomicMove::PieceMoved(m) => m.from(),
+            AtomicMove::PiecePromoted(p) => p.from(),
         }
     }
-}
-impl UciNotation for AtomicMove {
-    fn to_uci(&self) -> String {
+    pub fn cap(&self) -> bool {
         match self {
-            AtomicMove::PieceMoved(x) => x.to_uci(),
-            AtomicMove::PiecePromoted(x) => x.to_uci(),
+            AtomicMove::PieceMoved(x) => !(x.cap == None),
+            AtomicMove::PiecePromoted(x) => !(x.cap() == None),
         }
     }
 }
-
-// change in opponent pieces for capture
-#[derive(Clone, Copy)]
-pub struct CaptureData {
-    pub piece: Piece,
-    pub dst: Bitboard<Square>,
+impl Display for AtomicMove {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            AtomicMove::PieceMoved(x) => write!(f, "{x}"),
+            AtomicMove::PiecePromoted(x) => write!(f, "{x}"),
+        }
+    }
 }
 
 #[derive(Copy, Clone)]
 pub struct StandardMove {
     pub mv: AtomicMove,
-    pub cap: Option<CaptureData>,
     pub cas: CastleData,
 }
 impl StandardMove {
     pub fn is_moved(&self, piece: Piece) -> bool {
         return self.mv.does_affect(piece);
     }
-    pub fn uci(&self) -> String {
-        self.mv.to_uci()
+}
+
+impl Display for StandardMove {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.mv)
     }
 }
 
@@ -144,12 +190,9 @@ impl PartialMove {
             }
         }
     }
-    pub const fn is_capture(&self) -> bool {
+    pub fn is_capture(&self) -> bool {
         match self {
-            PartialMove::Std(x) => match x.cap {
-                None => false,
-                _ => true,
-            },
+            PartialMove::Std(x) => x.mv.cap(),
             _ => false,
         }
     }
@@ -184,10 +227,13 @@ impl PartialMove {
             },
         }
     }
-    pub fn uci(&self) -> String {
+}
+
+impl Display for PartialMove {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            PartialMove::Castle(x, pl, _) => (x, pl).to_uci(),
-            PartialMove::Std(x) => x.uci(),
+            PartialMove::Castle(x, pl, _) => write!(f, "{}", (x, pl).to_uci()),
+            PartialMove::Std(x) => write!(f, "{x}"),
         }
     }
 }
@@ -196,7 +242,7 @@ impl PartialMove {
 pub struct Move {
     // Full move data
     pm: PartialMove,
-    fifty_mv: usize, // either 0 if this move is eligible, or the nb of half moves before it happened
+    fifty_mv: u16, // either 0 if this move is eligible, or the nb of half moves before it happened
     en_passant: Bitboard<GenericBB>,
 }
 
@@ -204,14 +250,14 @@ impl Move {
     pub const fn partialmove(&self) -> PartialMove {
         self.pm
     }
-    pub const fn fifty_mv(&self) -> usize {
+    pub const fn fifty_mv(&self) -> u16 {
         self.fifty_mv
     }
     pub const fn en_passant(&self) -> Bitboard<GenericBB> {
         self.en_passant
     }
 
-    pub const fn is_capture(&self) -> bool {
+    pub fn is_capture(&self) -> bool {
         self.pm.is_capture()
     }
     pub const fn is_promotion(&self) -> bool {
@@ -229,15 +275,16 @@ impl Move {
     pub fn src(&self) -> Bitboard<Square> {
         self.pm.src()
     }
-
-    pub fn uci(&self) -> String {
-        self.pm.uci()
+}
+impl Display for Move {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.pm)
     }
 }
 
 impl Debug for Move {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let _ = write!(f, "{}", self.uci());
+        let _ = write!(f, "{}", self);
         Ok(())
     }
 }
@@ -290,11 +337,7 @@ fn which_piece_on_sq(sq: Bitboard<Square>, pos: &PieceSet) -> Option<Piece> {
 }
 
 // dest has to point to a single square
-fn generate_capture_data(
-    meta: &AugmentedPos,
-    dest: Bitboard<Square>,
-    p: Piece,
-) -> Option<CaptureData> {
+fn generate_capture_data(meta: &AugmentedPos, dest: Bitboard<Square>, p: Piece) -> Option<Piece> {
     // TODO: #[cfg(debug_assertions)] - single byte
     /*if (dest.declass() & (meta.get_occupied()[meta.opponent()] | meta.p.en_passant))
         != SpecialBB::Empty.declass()
@@ -302,42 +345,31 @@ fn generate_capture_data(
     match which_piece_on_sq(dest, meta.semi_pos(meta.opponent())) {
         None => match p {
             // ghost capture, either en passant or nothing
-            Piece::Pawn => match meta.p.en_passant & dest == SpecialBB::Empty.declass() {
-                true => Some(CaptureData {
-                    piece: Piece::Pawn,
-                    dst: dest,
-                }),
+            Piece::Pawn => match meta.p.en_passant & dest != SpecialBB::Empty.declass() {
+                true => Some(Piece::Pawn),
                 false => None,
             },
             // {println!("En passant detected but not properly handled yet"); meta.p.pretty_print(); todo!()},
             _ => None, // only a piece going behind a pawn which just moved up 2 squares
         },
         //todo!(), // en passant !!!,
-        Some(x) => Some(CaptureData {
-            piece: x,
-            dst: dest,
-        }),
+        Some(x) => Some(x),
     }
 }
 
 // returns the number of atomic moves associated, typically 1 or 6
 pub fn generate_non_promoting_atmove(
+    meta: &AugmentedPos,
     src: &Bitboard<Square>,
     dest: &Bitboard<Square>,
     piece: &Piece,
 ) -> AtomicMove {
-    /*#[cfg(debug_assertions)]
-    {
-        let condition = (*piece as usize == Piece::Pawn as usize)
-            && (dest.declass() & (Rank::R1.declass() | Rank::R8.declass()))
-                != SpecialBB::Empty.declass();
-        debug_assert!(!condition);
-    }*/
-    AtomicMove::PieceMoved(Change {
-        p: *piece,
-        dest: *dest,
-        from: *src,
-    })
+    AtomicMove::PieceMoved(Change::encode(
+        *piece,
+        generate_capture_data(meta, *dest, *piece),
+        dest,
+        src,
+    ))
 }
 
 // cannot be called on a castle move
@@ -350,25 +382,21 @@ pub fn generate_castle_data(
     let mut cd: CastleData = CASTLES_KEEP_UNCHANGED; // eveything to false
     match piece {
         // reset castles for king/rook moves
-        Piece::King => cd.x[meta.player() as usize] = meta.p.castles.x[meta.player() as usize],
+        Piece::King => cd.copy_selection_player(meta.player(), &meta.p.castles),
         Piece::Rook => {
             if src.declass() == (File::A.declass() & meta.player().backrank()) {
-                cd.x[meta.player() as usize].x[Castle::Long as usize] =
-                    meta.p.castles.x[meta.player() as usize].x[Castle::Long as usize]
+                cd.copy_selection_precise(meta.player(), Castle::Long, &meta.p.castles)
             } else if src.declass() == (File::H.declass() & meta.player().backrank()) {
-                cd.x[meta.player() as usize].x[Castle::Short as usize] =
-                    meta.p.castles.x[meta.player() as usize].x[Castle::Short as usize]
+                cd.copy_selection_precise(meta.player(), Castle::Short, &meta.p.castles)
             }
         }
         _ => (),
     }
     // capture opponent rook
     if dest.declass() == (File::A.declass() & meta.opponent().backrank()) {
-        cd.x[meta.opponent() as usize].x[Castle::Long as usize] =
-            meta.p.castles.x[meta.opponent() as usize].x[Castle::Long as usize]
+        cd.copy_selection_precise(meta.opponent(), Castle::Long, &meta.p.castles)
     } else if dest.declass() == (File::H.declass() & meta.opponent().backrank()) {
-        cd.x[meta.opponent() as usize].x[Castle::Short as usize] =
-            meta.p.castles.x[meta.opponent() as usize].x[Castle::Short as usize]
+        cd.copy_selection_precise(meta.opponent(), Castle::Short, &meta.p.castles)
     }
 
     cd
@@ -383,7 +411,7 @@ pub fn generate_castle_move(meta: &AugmentedPos, c: castle::Castle) -> Option<Mo
     {
         // forbid current player castles
         let mut new_cas_data = CASTLES_KEEP_UNCHANGED;
-        new_cas_data.x[meta.player() as usize] = meta.p.castles.x[meta.player() as usize];
+        new_cas_data.copy_selection_player(meta.player(), &meta.p.castles);
 
         let mv = Move {
             pm: PartialMove::Castle(c, meta.player(), new_cas_data),
@@ -410,10 +438,6 @@ fn is_legal(p: &Position, mv: Move) -> bool {
 // WARNING modified to generate pseudolegal moves as well
 // return future index
 fn add_to_move_list(p: &AugmentedPos, m: Move, movelist: &mut MoveVec) {
-    // #[cfg(debug_assertions)]
-    // {
-    //     println!("Considering move {:?}", m.uci());
-    // }
     let pinned = (m.src().declass() & p.pinned) != SpecialBB::Empty.declass();
     // if src is pinned and moves to a destination not pinned it will be illegal anyway
     let pinned_dst = m.dest().declass() & p.pinned != SpecialBB::Empty.declass();
@@ -457,13 +481,13 @@ fn generate_non_pawn_move_data(
 ) {
     //println!("Generate move data for {:?} on {:?}, dests {:?}", piece, src, dests);
     for sq in *dests {
-        let atomic_move = generate_non_promoting_atmove(src, &sq, piece);
+        let atomic_move = generate_non_promoting_atmove(meta, src, &sq, piece);
         {
             let pm = PartialMove::Std(StandardMove {
                 mv: atomic_move,
-                cap: generate_capture_data(meta, sq, Piece::King),
                 cas: generate_castle_data(meta, src, &sq, piece),
             });
+
             let fifty_mv = match pm.is_capture() | (*piece == Piece::Pawn) {
                 true => meta.p.fifty_mv,
                 _ => 0,
@@ -486,6 +510,7 @@ fn generate_non_pawn_move_data(
 }
 
 pub fn generate_pawn_atmove(
+    meta: &AugmentedPos,
     src: &Bitboard<Square>,
     dest: &Bitboard<Square>,
     piece: &Piece,
@@ -496,30 +521,34 @@ pub fn generate_pawn_atmove(
     let mut p: FastVec<4, AtomicMove> = FastVec::new();
     match is_prom {
         false => {
-            p.push(generate_non_promoting_atmove(src, dest, piece));
+            p.push(generate_non_promoting_atmove(meta, src, dest, piece));
             p
         }
         true => {
-            let a = AtomicMove::PiecePromoted(Promotion {
-                dest: *dest,
-                from: *src,
-                new: Piece::Knight,
-            });
-            let b = AtomicMove::PiecePromoted(Promotion {
-                dest: *dest,
-                from: *src,
-                new: Piece::Bishop,
-            });
-            let c = AtomicMove::PiecePromoted(Promotion {
-                dest: *dest,
-                from: *src,
-                new: Piece::Rook,
-            });
-            let d = AtomicMove::PiecePromoted(Promotion {
-                dest: *dest,
-                from: *src,
-                new: Piece::Queen,
-            });
+            let a = AtomicMove::PiecePromoted(Promotion::encode(
+                Piece::Knight,
+                generate_capture_data(meta, *dest, *piece),
+                dest,
+                src,
+            ));
+            let b = AtomicMove::PiecePromoted(Promotion::encode(
+                Piece::Bishop,
+                generate_capture_data(meta, *dest, *piece),
+                dest,
+                src,
+            ));
+            let c = AtomicMove::PiecePromoted(Promotion::encode(
+                Piece::Rook,
+                generate_capture_data(meta, *dest, *piece),
+                dest,
+                src,
+            ));
+            let d = AtomicMove::PiecePromoted(Promotion::encode(
+                Piece::Queen,
+                generate_capture_data(meta, *dest, *piece),
+                dest,
+                src,
+            ));
             p.push(a);
             p.push(b);
             p.push(c);
@@ -536,11 +565,10 @@ fn generate_pawn_move_data(meta: &AugmentedPos, src: &Bitboard<Square>, movelist
         | dests::pawn_move_up_nocap(*src, meta.player(), blockers);
 
     for sq in dests {
-        let outcomes = generate_pawn_atmove(src, &sq, &Piece::Pawn);
+        let outcomes = generate_pawn_atmove(meta, src, &sq, &Piece::Pawn);
 
         let pm = PartialMove::Std(StandardMove {
             mv: outcomes[0],
-            cap: generate_capture_data(meta, sq, Piece::King),
             cas: generate_castle_data(meta, src, &sq, &Piece::Pawn),
         });
         let mut m = Move {
@@ -579,7 +607,7 @@ pub struct AugmentedPos<'a> {
 impl<'a> AugmentedPos<'a> {
     // would return an error if the position is illegal already
     pub fn list_issues(p: &'a Position) -> Result<MoveVec, ()> {
-        let turn = Player::from_usize(p.half_move_count % 2);
+        let turn = Player::from_usize((p.half_move_count % 2).into());
         let mut a = AugmentedPos {
             p: p,
             occupied: PlayerStorage::from([SpecialBB::Empty.declass(), SpecialBB::Empty.declass()]),
@@ -594,7 +622,7 @@ impl<'a> AugmentedPos<'a> {
     }
 
     pub fn check_legal(p: &Position) -> Result<(), ()> {
-        let turn = Player::from_usize(p.half_move_count % 2);
+        let turn = Player::from_usize((p.half_move_count % 2).into());
         let mut a = AugmentedPos {
             p: p,
             occupied: PlayerStorage::from([SpecialBB::Empty.declass(), SpecialBB::Empty.declass()]),
@@ -637,8 +665,8 @@ impl<'a> AugmentedPos<'a> {
     }
 
     // assume occupied squares and "pins" are known
-    fn compute_attacked_gen_moves(&mut self) -> Result<customvec::MoveVec, ()> {
-        let mut movelist = customvec::MoveVec::new();
+    fn compute_attacked_gen_moves(&mut self) -> Result<localvec::MoveVec, ()> {
+        let mut movelist = localvec::MoveVec::new();
         let blockers = self.occupied[Player::White] | self.occupied[Player::Black];
 
         self.attacked[self.turn.other()] =

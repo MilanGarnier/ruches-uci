@@ -5,12 +5,25 @@ use super::position::PieceSet;
 use super::position::Position;
 use super::position::piece::Piece;
 
+use super::BasicEvaluation;
+
+#[derive(Clone, Copy)]
+pub struct MaterialBalance {}
+impl BasicEvaluation for MaterialBalance {
+    fn eval(p: &Position) -> Eval {
+        eval_fn(p)
+    }
+    fn t() -> Self {
+        MaterialBalance {  }
+    }
+}
+
 impl Piece {
     fn value(self) -> usize {
         match self {
             Piece::Pawn => 100,
             Piece::Knight => 300,
-            Piece::Bishop => 302,
+            Piece::Bishop => 300,
             Piece::Rook => 500,
             Piece::Queen => 900,
             Piece::King => panic!(),
@@ -32,15 +45,13 @@ fn player_material(pp: &PieceSet) -> usize {
 // TODO get rid of it
 pub static mut NODES: usize = 0;
 
-pub fn eval_fn(p: &Position) -> Eval {
+fn eval_fn(p: &Position) -> Eval {
     unsafe { NODES += 1 };
     let p = p.pos();
     let x =
         player_material(&p[Player::White]) as isize - player_material(&p[Player::Black]) as isize;
     Eval::Approx(super::ApproxEval {
-        x: i32::try_from(x).unwrap(),
+        cp: i32::try_from(x).unwrap(),
         depth: 0,
     })
 }
-
-// TODO: impl smth like static_assert!(type(eval) == EvalPos);

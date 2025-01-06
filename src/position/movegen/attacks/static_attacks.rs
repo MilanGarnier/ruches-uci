@@ -2,7 +2,6 @@ use std::random;
 use std::sync::LazyLock;
 use std::time::{Duration, Instant};
 
-use crate::position::UciNotation;
 use crate::position::bitboard::{Bitboard, File, FromBB, GenericBB, Rank, SpecialBB, Square, ToBB};
 
 use super::dyn_attacks;
@@ -58,15 +57,6 @@ impl Lookup {
     }
 }
 
-pub fn generate_knights(bb: Bitboard<GenericBB>) -> Bitboard<GenericBB> {
-    let mut b = Bitboard(GenericBB(0));
-    for sq in bb {
-        b = b | STATIC_ATTACKS.at_knights[sq.to_index() as usize];
-    }
-    debug_assert_eq!(b, dyn_attacks::generate_knights(bb), "src : {:?}", bb);
-    b
-}
-
 pub fn generate_bishops(
     p: Bitboard<GenericBB>,
     blockers: Bitboard<GenericBB>,
@@ -79,10 +69,10 @@ pub fn generate_bishops(
         dests,
         dyn_attacks::generate_bishops(p, blockers),
         "Bishop in {} with {} as blockers gave different outcomes : {}, {}",
-        p.to_uci(),
-        (blockers).to_uci(),
-        dests.to_uci(),
-        dyn_attacks::generate_bishops(p, blockers).to_uci()
+        p,
+        blockers,
+        dests,
+        dyn_attacks::generate_bishops(p, blockers)
     );
     dests
 }
@@ -100,10 +90,10 @@ pub fn generate_rooks(
         dests,
         dyn_attacks::generate_rooks(p, blockers),
         "Rook in {} with {} as blockers gave different outcomes : {}, {}",
-        p.to_uci(),
-        (blockers).to_uci(),
-        dests.to_uci(),
-        dyn_attacks::generate_rooks(p, blockers).to_uci()
+        p,
+        (blockers),
+        dests,
+        dyn_attacks::generate_rooks(p, blockers)
     );
     dests
 }
@@ -156,8 +146,8 @@ impl<const N: usize> AttackTablePart<N> {
                 let x = last_print - start_time;
                 println!(
                     "Still searching for sq {} (blockers = {}) (time spent {}ms)",
-                    sq.to_uci(),
-                    blockers.to_uci(),
+                    sq,
+                    blockers,
                     x.as_millis()
                 )
             }
@@ -182,12 +172,7 @@ impl<const N: usize> AttackTablePart<N> {
             }
             if found {
                 if verbose || tries > 1 {
-                    println!(
-                        "Found key for sq {} (bl {}) - {}",
-                        sq.to_uci(),
-                        blockers.to_uci(),
-                        key
-                    );
+                    println!("Found key for sq {} (bl {}) - {}", sq, blockers, key);
                 }
                 return Self {
                     key,

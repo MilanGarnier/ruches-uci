@@ -9,9 +9,7 @@ pub trait Parsing {
 use bitboard::{BBSquare, Bitboard, File, FromBB, GenericBB, Rank, SpecialBB, Square, ToBB};
 
 use castle::{CASTLES_ALL_ALLOWED, CASTLES_ALL_FORBIDDEN, Castle, CastleData};
-use movegen::{
-    AtomicMove, AugmentedPos, CaptureData, Change, Move, PartialMove, Promotion, StandardMove,
-};
+use movegen::{AtomicMove, AugmentedPos, Change, Move, PartialMove, Promotion, StandardMove};
 use zobrist::{zobrist_hash_bitboard, zobrist_hash_square};
 
 pub mod bitboard;
@@ -21,6 +19,8 @@ pub mod piece;
 pub mod zobrist;
 
 use piece::Piece;
+
+use crate::uci::UciOutputStream;
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Player {
@@ -142,8 +142,8 @@ impl<T> std::ops::IndexMut<Player> for PlayerStorage<T> {
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Position {
-    pub fifty_mv: usize,
-    half_move_count: usize,
+    pub fifty_mv: u16,
+    half_move_count: u16,
     pos: PieceData,
     castles: CastleData,
     en_passant: Bitboard<GenericBB>,
@@ -218,26 +218,10 @@ impl Position {
         }
     }
 
-    fn stack_capdata_rev(&mut self, cd: &CaptureData, pl: Player) {
-        if cd.piece == Piece::Pawn
-            && cd.dst.declass() & self.en_passant != Bitboard(SpecialBB::Empty).declass()
-        {
-            // toggle ennemy pawn
-            self.pos[pl.other()][Piece::Pawn] = self.pos[pl.other()][Piece::Pawn] ^ {
-                match pl.other() {
-                    Player::Black => (cd.dst.declass() & self.en_passant) - 1,
-                    Player::White => (cd.dst.declass() & self.en_passant) + 1,
-                }
-            }
-        }
-        self.pos[pl][cd.piece] = self.pos[pl][cd.piece] ^ cd.dst;
-
-        self.zobrist ^= zobrist_hash_square(cd.dst, cd.piece, pl);
-    }
-
     fn stack_change_rev(&mut self, ch: &Change, pl: Player) {
         // en passant case
         if ch.piece() == Piece::Pawn
+            && ch.cap() == Some(Piece::Pawn)
             && ch.bitboard() & self.en_passant != Bitboard(SpecialBB::Empty).declass()
         {
             // toggle ennemy pawn
@@ -247,18 +231,35 @@ impl Position {
                     Player::White => (ch.bitboard() & self.en_passant) + 1,
                 }
             }
+        } else {
+            match ch.cap() {
+                Some(cap) => {
+                    self.pos[pl.other()][cap] ^= ch.dest();
+                    self.zobrist ^= zobrist_hash_bitboard(ch.dest().declass(), cap, pl.other());
+                }
+                None => (),
+            }
         }
-        self.pos[pl][ch.piece()] = self.pos[pl][ch.piece()] ^ ch.bitboard();
+        self.pos[pl][ch.piece()] ^= ch.bitboard();
+
         self.zobrist ^= zobrist_hash_bitboard(ch.bitboard(), ch.piece(), pl);
     }
     fn stack_prom_rev(&mut self, pr: &Promotion) {
         let turn = self.turn();
 
-        self.pos[turn][pr.new] = self.pos[turn][pr.new] ^ pr.dest;
-        self.pos[turn][Piece::Pawn] = self.pos[turn][Piece::Pawn] ^ pr.from;
+        self.pos[turn][pr.new_piece()] ^= pr.dest();
+        self.pos[turn][Piece::Pawn] ^= pr.from();
 
-        self.zobrist ^= zobrist_hash_square(pr.dest, pr.new, turn);
-        self.zobrist ^= zobrist_hash_square(pr.from, Piece::Pawn, turn);
+        match pr.cap() {
+            Some(cap) => {
+                self.pos[turn.other()][cap] ^= pr.dest();
+                self.zobrist ^= zobrist_hash_bitboard(pr.dest().declass(), cap, turn.other());
+            }
+            None => (),
+        }
+
+        self.zobrist ^= zobrist_hash_square(pr.dest(), pr.new_piece(), turn);
+        self.zobrist ^= zobrist_hash_square(pr.from(), Piece::Pawn, turn);
     }
     fn stack_atomic_rev(&mut self, amv: &AtomicMove) {
         match amv {
@@ -267,10 +268,6 @@ impl Position {
         }
     }
     fn stack_std_rev(&mut self, smv: &StandardMove) {
-        match smv.cap {
-            None => (),
-            Some(ch) => self.stack_capdata_rev(&ch, self.turn().other()),
-        }
         self.castles.stack_rev(&smv.cas);
         self.stack_atomic_rev(&smv.mv);
     }
@@ -281,8 +278,8 @@ impl Position {
                 let king_ch = turn.backrank().declass() & (File::E.declass() | File::G.declass());
                 let rook_ch = turn.backrank().declass() & (File::H.declass() | File::F.declass());
 
-                self.pos[turn][Piece::King] = self.pos[turn][Piece::King] ^ king_ch;
-                self.pos[turn][Piece::Rook] = self.pos[turn][Piece::Rook] ^ rook_ch;
+                self.pos[turn][Piece::King] ^= king_ch;
+                self.pos[turn][Piece::Rook] ^= rook_ch;
 
                 self.zobrist ^= zobrist_hash_bitboard(king_ch, Piece::King, turn);
                 self.zobrist ^= zobrist_hash_bitboard(rook_ch, Piece::Rook, turn);
@@ -291,8 +288,8 @@ impl Position {
                 let king_ch = turn.backrank().declass() & (File::E.declass() | File::C.declass());
                 let rook_ch = turn.backrank().declass() & (File::A.declass() | File::D.declass());
 
-                self.pos[turn][Piece::King] = self.pos[turn][Piece::King] ^ king_ch;
-                self.pos[turn][Piece::Rook] = self.pos[turn][Piece::Rook] ^ rook_ch;
+                self.pos[turn][Piece::King] ^= king_ch;
+                self.pos[turn][Piece::Rook] ^= rook_ch;
 
                 self.zobrist ^= zobrist_hash_bitboard(king_ch, Piece::King, turn);
                 self.zobrist ^= zobrist_hash_bitboard(rook_ch, Piece::Rook, turn);
@@ -311,23 +308,17 @@ impl Position {
 
     pub fn stack(&mut self, mv: &Move) {
         self.stack_partial_rev(&mv.partialmove());
-        self.fifty_mv = self.fifty_mv ^ mv.fifty_mv();
-        self.en_passant = self.en_passant ^ mv.en_passant();
+        self.fifty_mv ^= mv.fifty_mv();
+        self.en_passant ^= mv.en_passant();
         self.half_move_count += 1;
     }
 
     pub fn unstack(&mut self, mv: &Move) {
         self.half_move_count -= 1;
-        self.fifty_mv = self.fifty_mv ^ mv.fifty_mv();
-        self.en_passant = self.en_passant ^ mv.en_passant();
+        self.fifty_mv ^= mv.fifty_mv();
+        self.en_passant ^= mv.en_passant();
         self.stack_partial_rev(&mv.partialmove());
     }
-
-    /*pub fn play_pseudolegal(&self, mv: &Move) -> Self {
-        let mut pos = self.clone();
-        pos.stack(mv);
-        pos
-    }*/
 
     // very unoptimized, should not be called when we can access the move as &mv
     pub fn getmove(&mut self, uci: &str) -> Result<Option<Move>, ()> {
@@ -337,14 +328,16 @@ impl Position {
             Ok(meta) => meta,
         };
         for m in moves.iter() {
-            if m.uci() == uci {
+            if format!("{m}") == uci {
                 return Ok(Some(*m));
             }
         }
         Ok(None)
     }
     #[cfg(feature = "perft")]
-    pub fn perft_top(&mut self, depth: usize) -> usize {
+    pub fn perft_top<O: UciOutputStream>(&mut self, depth: usize) -> usize {
+        use crate::uci::UciResponse;
+
         let mut cache = match depth {
             0..=3 => PerftCache::new(1),
             4..=5 => PerftCache::new(1024 * 1024),
@@ -363,7 +356,8 @@ impl Position {
                 for m in ml.iter() {
                     self.stack(m);
                     let count = self.perft_rec(depth - 1, 1, &mut cache);
-                    println!("{}: {}", m.uci(), count);
+                    O::send_response(UciResponse::Raw(format!("{}: {}", m, count).as_str()))
+                        .unwrap();
                     sum += count;
                     self.unstack(m);
                 }
@@ -502,32 +496,32 @@ impl Position {
         debug_assert_eq!(sq_index, 8);
 
         let full_moves = full_moves
-            .parse::<usize>()
+            .parse::<u16>()
             .expect("Incorrect fen + bad handling = exception :/ [full moves]");
         let turn = match turn {
             "w" => Player::White,
             "b" => Player::Black,
             _ => panic!("Incorrect turn parameter in fen description ({})", turn),
         };
-        pos.half_move_count = 2 * full_moves + turn as usize;
+        pos.half_move_count = 2 * full_moves + turn as u16;
         pos.fifty_mv = hf_mv_until_100
-            .parse::<usize>()
+            .parse::<u16>()
             .expect("Incorrect input for fifty move rule");
 
         for c in castles.chars() {
             match c {
                 '-' => break,
-                'K' => pos.castles.x[Player::White as usize].x[Castle::Short as usize] = true,
-                'Q' => pos.castles.x[Player::White as usize].x[Castle::Long as usize] = true,
-                'k' => pos.castles.x[Player::Black as usize].x[Castle::Short as usize] = true,
-                'q' => pos.castles.x[Player::Black as usize].x[Castle::Long as usize] = true,
+                'K' => pos.castles.set(Player::White, Castle::Short, true),
+                'Q' => pos.castles.set(Player::White, Castle::Long, true),
+                'k' => pos.castles.set(Player::Black, Castle::Short, true),
+                'q' => pos.castles.set(Player::Black, Castle::Long, true),
                 _ => panic!("Incorrect castling rights in fen description ({})", castles),
             }
         }
 
-        pos.en_passant = match BBSquare::from_str(en_passant) {
-            None => SpecialBB::Empty.declass(),
-            Some(x) => x.declass(),
+        pos.en_passant = match BBSquare::try_from(en_passant) {
+            Err(()) => SpecialBB::Empty.declass(),
+            Ok(x) => x.declass(),
         };
 
         pos
@@ -538,19 +532,22 @@ impl Position {
 
 impl Position {
     // TODO: replace with fen interpretation / or other
-    pub fn pretty_print(&self) {
+    pub fn pretty_print<O: UciOutputStream>(&self) {
         debug_assert_eq!(File::G.declass() & Rank::R5, Square::g5.declass());
 
         let repr = PlayerStorage::from([['♟', '♞', '♝', '♜', '♛', '♚'], [
             '♙', '♘', '♗', '♖', '♕', '♔',
         ]]);
-        println!("┏━━━┯━━━┯━━━┯━━━┯━━━┯━━━┯━━━┯━━━┓");
+        O::send_response(crate::uci::UciResponse::Debug(
+            "┏━━━┯━━━┯━━━┯━━━┯━━━┯━━━┯━━━┯━━━┓ ",
+        ))
+        .unwrap();
         // dirty, but anyway
 
         for rank in 0..8 {
-            print!("┃");
+            let mut s = format!("┃");
             for file in 0..8 {
-                print!(" ");
+                s = format!("{s} ");
                 let bb_sq = Bitboard(GenericBB(1 << (8 * (7 - rank) + file)));
                 let mut printed = false;
                 // only one in bb_sq but this is for safety
@@ -561,32 +558,41 @@ impl Position {
                             let pc = Piece::from_usize(pc).unwrap();
                             if self.pos[pl][pc] & sq != SpecialBB::Empty.declass() {
                                 printed = true;
-                                print!("{}", repr[pl][pc as usize]);
+                                s = format!("{s}{}", repr[pl][pc as usize]);
                                 break;
                             }
                         }
                     }
                 }
                 if !printed {
-                    print!(" ");
+                    s = format!("{s} ");
                 }
-                print!(" ");
+                s = format!("{s} ");
                 if file != 7 {
-                    print!("│");
+                    s = format!("{s}│");
                 }
             }
-            println!("┃{}", 7 - rank + 1);
+            s = format!("{s}┃{}", 7 - rank + 1);
+            O::send_response(crate::uci::UciResponse::Debug(s.as_str())).unwrap();
             if rank != 7 {
-                println!("┠───┼───┼───┼───┼───┼───┼───┼───┨");
+                O::send_response(crate::uci::UciResponse::Debug(
+                    "┠───┼───┼───┼───┼───┼───┼───┼───┨ ",
+                ))
+                .unwrap();
             }
         }
-        println!("┗━━━┷━━━┷━━━┷━━━┷━━━┷━━━┷━━━┷━━━┛");
-        println!("  a   b   c   d   e   f   g   h");
+        O::send_response(crate::uci::UciResponse::Debug(
+            "┗━━━┷━━━┷━━━┷━━━┷━━━┷━━━┷━━━┷━━━┛ ",
+        ))
+        .unwrap();
+        O::send_response(crate::uci::UciResponse::Debug(
+            "  a   b   c   d   e   f   g   h  ",
+        ))
+        .unwrap();
         //println!("Debug : {:#?}", AugmentedPos::create(&mut self.clone()));
     }
 }
 
-use super::eval::{self, Eval, EvalState};
 use super::tt::{PerftCache, PerftInfo};
 impl Position {
     /*#[cfg(debug_assertions)]
@@ -609,80 +615,36 @@ impl Position {
             }
         }
     }*/
-    pub fn eval_minimax(&mut self, depth: usize, eval_fn: &eval::EvalFun) -> Result<EvalState, ()> {
-        //#[cfg(debug_assertions)]
-        //self.assert_squares_occupied_only_once();
-        match depth {
-            // TODO: add quiescent search for depth 1
-            0 => {
-                let a = AugmentedPos::list_issues(&self);
-                match a {
-                    Err(()) => Err(()),
-                    Ok(_) => Ok(EvalState::new(&eval_fn(self))),
-                }
-            }
-            _ => {
-                let turn = self.turn();
-                let movelist = AugmentedPos::list_issues(self)?;
-                //let is_check = !meta.is_check();
-
-                let mut best_eval = EvalState::new(&Eval::m0(turn.other()));
-                let mut best_move = None;
-                let mut explored = 0;
-                for m in movelist.iter() {
-                    self.stack(m);
-                    let eval = self.eval_minimax(depth - 1, eval_fn);
-                    self.unstack(m);
-                    match eval {
-                        Err(()) => continue,
-                        Ok(eval) => {
-                            if (EvalState::pick_best_for(turn, &best_eval, &eval)) == 1 {
-                                best_eval = eval;
-                                best_move = Some(m);
-                            }
-                            if explored == 0 {
-                                best_move = Some(m)
-                            }
-                            explored += 1;
-                        }
-                    }
-                }
-                // if there were no legal moves and no check, set to draw instead of M0
-                if explored == 0
-                /*&& is_check*/
-                {
-                    best_eval = EvalState::new(&Eval::draw());
-                    Ok(best_eval)
-                } else if explored != 0 {
-                    let m = best_move.unwrap();
-                    best_eval.nest(&m);
-                    Ok(best_eval)
-                } else {
-                    Ok(best_eval)
-                }
-            }
-        }
-    }
-}
-
-#[test]
-fn basic_perft() {
-    let a = Position::startingpos();
-    let ml = AugmentedPos::list_issues(&a).unwrap();
-    assert_eq!(ml.len(), 20);
 }
 
 #[cfg(test)]
 mod tests {
     extern crate test;
+    use std::io::Stdout;
+
     use test::Bencher;
+
+    use crate::{
+        position::{Player, movegen::AugmentedPos},
+        uci::{NullUciStream, UciOut, UciOutputStream},
+    };
+
+    use super::Position;
 
     #[cfg(feature = "perft")]
     #[bench]
-    fn perft_startpos_3(b: &mut Bencher) {
+    fn perft_startpos(b: &mut Bencher) {
+        use crate::uci::NullUciStream;
+
+        let mut a = super::Position::startingpos();
+
+        assert_eq!(a.perft_top::<NullUciStream>(1), 20);
+        assert_eq!(a.perft_top::<NullUciStream>(2), 400);
+        assert_eq!(a.perft_top::<NullUciStream>(3), 8902);
+
         let mut a = super::Position::startingpos();
         b.iter(|| {
-            a.perft_top(3);
+            assert_eq!(a.perft_top::<NullUciStream>(3), 8902);
         });
     }
 
@@ -703,5 +665,48 @@ mod tests {
             initial_hash, a.zobrist,
             "Hash has been altered in issue exploration phase"
         );
+    }
+
+    #[test]
+    fn captures_knight() {
+        let mut p = Position::from_fen("7k/p7/8/1N6/8/8/8/7K", "w", "-", "-", "0", "0");
+        let x = p.getmove("b5a7").expect("Did not find capture").unwrap();
+        p.stack(&x);
+        assert_eq!(p.half_move_count, 1);
+        assert_eq!(p.fifty_mv, 0);
+        assert_eq!(p.turn(), Player::Black);
+        assert_eq!(AugmentedPos::list_issues(&p).unwrap().len(), 3);
+    }
+
+    #[test]
+    fn captures_en_passant() {
+        let mut p = Position::from_fen("7k/8/8/8/1p6/8/P7/7K", "w", "-", "-", "0", "0");
+        let x = p.getmove("a2a4").unwrap().unwrap();
+        p.stack(&x);
+        assert_eq!(p.half_move_count, 1);
+        assert_eq!(p.fifty_mv, 0);
+        let x = p.getmove("b4a3").unwrap().unwrap();
+        p.stack(&x);
+        assert_eq!(p.half_move_count, 2);
+        assert_eq!(p.fifty_mv, 0);
+        assert_eq!(AugmentedPos::list_issues(&p).unwrap().len(), 3);
+    }
+
+    #[test]
+    fn promotion() {
+        let mut p = Position::from_fen("7k/P7/8/8/8/8/8/7K", "w", "-", "-", "0", "0");
+        assert_eq!(
+            p.perft_top::<NullUciStream>(1),
+            4 + 3,
+            "Failed counting moves in promoting position."
+        ); // 4 pieces possible + 3 king moves
+        //p.perft_top::<UciOut<Stdout>>(1);
+        let x = p.getmove("a7a8q").unwrap().unwrap();
+        p.stack(&x);
+        assert_eq!(
+            p.perft_top::<NullUciStream>(1),
+            2,
+            "Failed promotion to queen"
+        ); // king in check
     }
 }

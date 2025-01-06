@@ -17,7 +17,7 @@ impl Hashable<usize> for Position {
     fn safety_feature(x: &Self) -> usize {
         x.zobrist
             ^ (x.castles.hash() * 4654987)
-            ^ (x.half_move_count * 98798462468384)
+            ^ (x.half_move_count as usize * 98798462468384)
             ^ x.en_passant.to_bb64() as usize
             ^ (x.pos.black.occupied().to_bb64() as usize).wrapping_mul(6541653246798795667)
             ^ (x.pos.white.occupied().to_bb64() as usize).wrapping_mul(9897995300789921388)

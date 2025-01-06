@@ -3,20 +3,26 @@
 #![feature(test)]
 #![feature(async_closure)]
 
-use std::io::{stdin, stdout};
+use std::{
+    io::Stdout,
+    sync::LazyLock,
+};
+
+use uci::{UciOut, UciShell};
 
 pub mod eval;
+pub mod localvec;
 pub mod position;
+pub mod search;
 pub mod tt; // transposition tables
 mod uci;
 
-#[tokio::main(flavor = "current_thread")]
+static INTERFACE: LazyLock<UciShell> = LazyLock::new(|| uci::UciShell::new());
+
+#[tokio::main/*(flavor = "current_thread")*/]
+
 async fn main() {
-    //println!("Zobrist key {:?}", position::zobrist::random_zobrist_seed());
-
     let mut args: Vec<_> = std::env::args().collect();
-
-    let mut interface = uci::UciShell::new(stdin(), stdout());
 
     // either single command or multiple command
     if args.len() > 2 {
@@ -26,12 +32,12 @@ async fn main() {
             command += &x;
             command += " ";
         }
-        println!("Running command {:?}", command);
-        interface.runcommand(uci::parse(command).unwrap()).unwrap();
+        //println!("Running command {:?}", command);
+        INTERFACE
+            .runcommand::<UciOut<Stdout>>(uci::parse(command).unwrap())
+            .await
+            .unwrap();
     } else {
-        interface.run().await;
+        INTERFACE.run::<UciOut<Stdout>>().await;
     }
-
-    //println!("Running unit tests");
-    //crate::test::run();
 }
