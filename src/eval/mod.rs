@@ -5,7 +5,7 @@ use std::fmt::{Display, Formatter};
 pub use s_count_material::MaterialBalance;
 
 use super::position;
-use super::position::{Player, Position, movegen::Move};
+use super::position::{Position, movegen::Move, player::Player};
 
 #[derive(Clone, Copy)]
 pub struct ApproxEval {
@@ -22,7 +22,7 @@ pub struct ForcedMate {
     hmove_count: usize,
 }
 
-pub trait BasicEvaluation: Copy {
+pub trait BasicEvaluation: Clone {
     fn t() -> Self;
     fn eval(p: &Position) -> Eval;
 }
@@ -150,7 +150,7 @@ impl Eval {
             _ => 1 - Eval::pick_best_for(p, e1, e0),
         }
     }
-    fn nest(&self) -> Self {
+    fn nest(self) -> Self {
         match self {
             Self::Approx(x) => Self::Approx(x.nest()),
             Self::Mate(x) => Self::Mate(x.nest()),
@@ -172,9 +172,9 @@ impl EvalState {
     }
 
     // create the evalState for the current move, knowing that the eval is the best for player
-    pub fn nest(&mut self, m: &Move) {
+    pub fn nest(&mut self, m: Move) {
         self.eval = self.eval.nest();
-        self.pv.0.push(*m);
+        self.pv.0.push(m);
     }
     pub fn new(e: Eval) -> Self {
         Self {

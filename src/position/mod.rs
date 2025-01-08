@@ -1,6 +1,3 @@
-pub trait UciNotation {
-    fn to_uci(&self) -> String;
-}
 pub trait Parsing {
     type Resulting: ?Sized;
     fn from_str(s: &str) -> Self::Resulting;
@@ -16,41 +13,13 @@ pub mod bitboard;
 mod castle;
 pub mod movegen;
 pub mod piece;
+pub mod player;
 pub mod zobrist;
 
 use piece::Piece;
+use player::Player;
 
 use crate::uci::UciOutputStream;
-
-#[derive(Clone, Copy, PartialEq, Debug)]
-pub enum Player {
-    White,
-    Black,
-}
-
-impl Player {
-    pub const COUNT: usize = 2;
-    pub const fn other(&self) -> Player {
-        match self {
-            Player::Black => Player::White,
-            Player::White => Player::Black,
-        }
-    }
-    #[inline(always)]
-    pub const fn backrank(&self) -> Bitboard<Rank> {
-        match self {
-            Player::Black => Bitboard(Rank::R8),
-            Player::White => Bitboard(Rank::R1),
-        }
-    }
-    pub fn from_usize(x: usize) -> Player {
-        match x {
-            0 => Player::White,
-            1 => Player::Black,
-            _ => panic!("Unknown player sent p={x}"),
-        }
-    }
-}
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PieceSet {
@@ -66,12 +35,12 @@ pub struct PlayerStorage<T> {
     black: T,
     white: T,
 }
-impl<T: Clone> PlayerStorage<T> {
+impl<T: Copy> PlayerStorage<T> {
     #[inline(always)]
     pub fn from(x: [T; 2]) -> Self {
         Self {
-            white: x[0].clone(),
-            black: x[1].clone(),
+            white: x[0],
+            black: x[1],
         }
     }
 }

@@ -7,14 +7,14 @@ use super::position::piece::Piece;
 
 use super::BasicEvaluation;
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub struct MaterialBalance {}
 impl BasicEvaluation for MaterialBalance {
     fn eval(p: &Position) -> Eval {
         eval_fn(p)
     }
     fn t() -> Self {
-        MaterialBalance {  }
+        MaterialBalance {}
     }
 }
 

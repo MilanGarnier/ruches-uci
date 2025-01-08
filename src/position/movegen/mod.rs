@@ -10,13 +10,13 @@ use super::castle::{self, CASTLES_KEEP_UNCHANGED, Castle, CastleData};
 use super::piece::Piece;
 use super::{Player, PlayerStorage};
 
-use super::{PieceSet, Position, UciNotation};
+use super::{PieceSet, Position};
 
 pub mod attacks;
 mod dests;
 // mod heapvec;
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct Change {
     p: Piece,
     cap: Option<Piece>,
@@ -70,7 +70,7 @@ impl Display for Change {
     }
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct Promotion {
     data: Change, // simply a change but interpreted in a different way
 }
@@ -107,7 +107,7 @@ impl Display for Promotion {
 }
 impl Promotion {}
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub enum AtomicMove {
     PieceMoved(Change),
     PiecePromoted(Promotion),
@@ -149,7 +149,7 @@ impl Display for AtomicMove {
     }
 }
 
-#[derive(Copy, Clone)]
+#[derive(Clone, Copy)]
 pub struct StandardMove {
     pub mv: AtomicMove,
     pub cas: CastleData,
@@ -166,7 +166,7 @@ impl Display for StandardMove {
     }
 }
 
-#[derive(Copy, Clone)]
+#[derive(Clone, Copy)]
 pub enum PartialMove {
     Std(StandardMove),
     Castle(Castle, Player, CastleData),
@@ -232,13 +232,22 @@ impl PartialMove {
 impl Display for PartialMove {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            PartialMove::Castle(x, pl, _) => write!(f, "{}", (x, pl).to_uci()),
+            PartialMove::Castle(x, pl, _) => match x {
+                Castle::Short => match pl {
+                    Player::Black => writeln!(f, "e8g8"),
+                    Player::White => writeln!(f, "e1g1"),
+                },
+                Castle::Long => match pl {
+                    Player::Black => write!(f, "e8c8"),
+                    Player::White => write!(f, "e1c1"),
+                },
+            },
             PartialMove::Std(x) => write!(f, "{x}"),
         }
     }
 }
 
-#[derive(Copy, Clone)]
+#[derive(Clone, Copy)]
 pub struct Move {
     // Full move data
     pm: PartialMove,
@@ -247,8 +256,8 @@ pub struct Move {
 }
 
 impl Move {
-    pub const fn partialmove(&self) -> PartialMove {
-        self.pm
+    pub const fn partialmove<'a>(&'a self) -> &'a PartialMove {
+        &self.pm
     }
     pub const fn fifty_mv(&self) -> u16 {
         self.fifty_mv
@@ -299,12 +308,12 @@ impl<'a> MoveIter<'a> {
     }
 }
 impl<'a> Iterator for MoveIter<'a> {
-    type Item = Move;
+    type Item = &'a Move;
     fn next(&mut self) -> Option<Self::Item> {
         match self.index {
             256 => None,
             _ => {
-                let x = self.array[self.index];
+                let x = &self.array[self.index];
                 match x {
                     Some(m) => {
                         self.index += 1;
@@ -424,7 +433,7 @@ pub fn generate_castle_move(meta: &AugmentedPos, c: castle::Castle) -> Option<Mo
     }
 }
 
-fn is_legal(p: &Position, mv: Move) -> bool {
+fn is_legal(p: &Position, mv: &Move) -> bool {
     unsafe {
         let a = p as *const Position as *mut Position;
         let p = a.as_mut_unchecked();
@@ -467,7 +476,7 @@ fn add_to_move_list(p: &AugmentedPos, m: Move, movelist: &mut MoveVec) {
             //return;
         }
     }
-    if !edge_case || is_legal(p.p, m) {
+    if !edge_case || is_legal(p.p, &m) {
         movelist.push(m);
     }
 }
@@ -567,28 +576,21 @@ fn generate_pawn_move_data(meta: &AugmentedPos, src: &Bitboard<Square>, movelist
     for sq in dests {
         let outcomes = generate_pawn_atmove(meta, src, &sq, &Piece::Pawn);
 
-        let pm = PartialMove::Std(StandardMove {
-            mv: outcomes[0],
-            cas: generate_castle_data(meta, src, &sq, &Piece::Pawn),
-        });
-        let mut m = Move {
-            pm,
-            fifty_mv: meta.p.fifty_mv,
-            en_passant: generate_next_en_passant_data(Piece::Pawn, *src, sq, meta.turn)
-                ^ meta.p.en_passant,
-        };
+        let cas = generate_castle_data(meta, src, &sq, &Piece::Pawn);
+        let en_passant =
+            generate_next_en_passant_data(Piece::Pawn, *src, sq, meta.turn) ^ meta.p.en_passant;
+        for outcome in outcomes.iter() {
+            let pm = PartialMove::Std(StandardMove {
+                mv: *outcome,
+                cas: cas,
+            });
 
-        if outcomes.len() > 1 {
-            // then outcomes = 4
-            for i in 1..4 {
-                add_to_move_list(meta, m, movelist);
-                match &mut m.pm {
-                    PartialMove::Std(x) => x.mv = outcomes[i],
-                    _ => panic!(),
-                }
-            }
-            add_to_move_list(meta, m, movelist);
-        } else {
+            let m = Move {
+                pm,
+                fifty_mv: meta.p.fifty_mv,
+                en_passant,
+            };
+
             add_to_move_list(meta, m, movelist);
         }
     }

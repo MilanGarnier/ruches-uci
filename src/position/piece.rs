@@ -34,17 +34,17 @@ impl Piece {
 
 impl Piece {
     // return ranks of start positions (combined in a bitboard)
-    fn starting_files(&self) -> Bitboard<GenericBB> {
+    fn starting_files(self) -> Bitboard<GenericBB> {
         match self {
-            &Piece::Pawn => SpecialBB::Full.declass(), // all ranks
-            &Piece::Knight => File::B.declass() | File::G,
-            &Piece::Bishop => File::C.declass() | File::F,
-            &Piece::Rook => File::A.declass() | File::H,
-            &Piece::Queen => File::D.declass(),
-            &Piece::King => File::E.declass(),
+            Piece::Pawn => SpecialBB::Full.declass(), // all ranks
+            Piece::Knight => File::B.declass() | File::G,
+            Piece::Bishop => File::C.declass() | File::F,
+            Piece::Rook => File::A.declass() | File::H,
+            Piece::Queen => File::D.declass(),
+            Piece::King => File::E.declass(),
         }
     }
-    pub fn startingpos(&self, pl: Player) -> Bitboard<GenericBB> {
+    pub fn startingpos(self, pl: Player) -> Bitboard<GenericBB> {
         match self {
             Piece::Pawn => match pl {
                 Player::White => Rank::R2.declass(),

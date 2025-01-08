@@ -11,7 +11,7 @@ impl Search for MiniMaxMVP {
                 _ = &mut sigstop => {
                     break;
                 }
-                x = async move { let a = eval_minimax(&mut pos.clone(), depth, T::t()); tokio::time::sleep(Duration::from_millis(0)).await; a} => {
+                x = async move { let a = eval_minimax::<T>(&mut pos.clone(), depth); tokio::time::sleep(Duration::from_millis(0)).await; a} => {
                     x.unwrap()
                 }
             };
@@ -33,11 +33,7 @@ use crate::{
 
 use super::Search;
 
-pub fn eval_minimax<T: BasicEvaluation>(
-    pos: &mut Position,
-    depth: usize,
-    eval_fn: T,
-) -> Result<EvalState, ()> {
+pub fn eval_minimax<T: BasicEvaluation>(pos: &mut Position, depth: usize) -> Result<EvalState, ()> {
     //#[cfg(debug_assertions)]
     //pos.assert_squares_occupied_only_once();
     match depth {
@@ -59,7 +55,7 @@ pub fn eval_minimax<T: BasicEvaluation>(
             let mut explored = 0;
             for m in movelist.iter() {
                 pos.stack(m);
-                let eval = eval_minimax(pos, depth - 1, eval_fn);
+                let eval = eval_minimax::<T>(pos, depth - 1);
                 pos.unstack(m);
                 match eval {
                     Err(()) => continue,
@@ -83,7 +79,7 @@ pub fn eval_minimax<T: BasicEvaluation>(
                 Ok(best_eval)
             } else if explored != 0 {
                 let m = best_move.unwrap();
-                best_eval.nest(&m);
+                best_eval.nest(*m);
                 Ok(best_eval)
             } else {
                 Ok(best_eval)

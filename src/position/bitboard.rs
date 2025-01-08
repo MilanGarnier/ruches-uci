@@ -8,7 +8,6 @@ pub type bb64 = u64;
 /// Provides methods to iterate, represent, etc.
 /// To implement it for a type, simply implement the ToBB64 trait for the specific type
 ///     You will get in exchange all functions within the BitboardUnsafeOps trait (as well as op overloading)
-///     You will also get the UciNotationTrait in exchange
 /// To provide BitboardOpsKeepProperty, implement the FromBB64 trait
 /// TODO: replace the bb64 type by implementing const add, shift etc.
 #[derive(Clone, Copy)]

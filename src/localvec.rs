@@ -10,7 +10,7 @@ pub type MoveVec = FastVec<64, Move>;
 // this buffer is used to save data
 pub struct FastVec<const N: usize, EntryType: Copy> {
     // max th maximum, could go lower ? not sure -> or use heap if more than 8 of them for instance
-    stack: [MaybeUninit<EntryType>; N],
+    stack: MaybeUninit<[MaybeUninit<EntryType>; N]>,
     heap: MaybeUninit<Vec<EntryType>>,
     counter: usize,
     already_init_heap: bool,
@@ -19,7 +19,7 @@ impl<const N: usize, EntryType: Copy> FastVec<N, EntryType> {
     pub fn new() -> Self {
         debug_assert_eq!(0, N & (N - 1), "FastVec size should be a power of 2");
         FastVec {
-            stack: [MaybeUninit::uninit(); N],
+            stack: MaybeUninit::uninit(),
             heap: MaybeUninit::uninit(),
             counter: 0,
             already_init_heap: false,
@@ -27,7 +27,10 @@ impl<const N: usize, EntryType: Copy> FastVec<N, EntryType> {
     }
     pub fn push(&mut self, entry: EntryType) {
         if self.counter < N {
-            self.stack[self.counter] = MaybeUninit::new(entry);
+            unsafe {
+                let l = self.stack.assume_init_mut();
+                l[self.counter].write(entry);
+            }
             self.counter += 1;
         } else {
             match self.already_init_heap {
@@ -48,7 +51,10 @@ impl<const N: usize, EntryType: Copy> FastVec<N, EntryType> {
             unsafe { self.heap.assume_init_mut().pop() }
         } else if self.counter >= 1 {
             self.counter -= 1;
-            Some(unsafe { self.stack[self.counter].assume_init() })
+            Some(unsafe {
+                let l = self.stack.assume_init_ref();
+                *l[self.counter].assume_init_ref()
+            })
         } else {
             None
         }
@@ -71,7 +77,7 @@ impl<const N: usize, EntryType: Copy + Debug> Debug for FastVec<N, EntryType> {
         let _r = write!(f, "PregenCache<{}> | [ ", N);
         for i in 0..self.counter {
             unsafe {
-                let _r = write!(f, "{:?}", self.stack[i].assume_init());
+                let _r = write!(f, "{:?}", self.stack.assume_init_ref()[i].assume_init());
                 if i < self.counter - 1 {
                     let _r = write!(f, ", ");
                 }
@@ -108,7 +114,7 @@ impl<'a, const N: usize, EntryType: Copy> Iterator for LocalVecIterator<'a, N, E
         } else if self.curr < N {
             let x = self.curr;
             self.curr += 1;
-            Some(unsafe { self.lvec.stack[x].assume_init_ref() })
+            Some(unsafe { self.lvec.stack.assume_init_ref()[x].assume_init_ref() })
         } else {
             let x = self.curr;
             self.curr += 1;
@@ -136,7 +142,7 @@ impl<'a, const N: usize, EntryType: Copy> Index<usize> for FastVec<N, EntryType>
         if i >= N {
             unsafe { &self.heap.assume_init_ref()[i - N] }
         } else {
-            unsafe { self.stack[i].assume_init_ref() }
+            unsafe { self.stack.assume_init_ref()[i].assume_init_ref() }
         }
     }
     type Output = EntryType;

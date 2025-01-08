@@ -105,7 +105,7 @@ pub fn generate_queens(
     generate_bishops(p, blockers) | generate_rooks(p, blockers)
 }
 
-#[derive(Clone, Debug, Copy)]
+#[derive(Clone, Debug)]
 struct AttackTablePart<const N: usize> {
     key: u64,
     blocker_mask: Bitboard<GenericBB>,

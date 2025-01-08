@@ -1,6 +1,5 @@
 use std::{fmt::Debug, marker::PhantomData, mem::MaybeUninit, ops::Index};
 
-
 use super::position::Position;
 
 // TODO: move in specialized perft submodule
@@ -122,7 +121,7 @@ impl<X: CopyMoreRelevant + PartialEq, S: PartialEq, I: Hashable<S> + PartialEq +
                 None => self._items += 1,
                 Some(_) => self._replaced += 1,
             }
-            let idx_dest = unsafe{ self._positions[i].assume_init_mut() };
+            let idx_dest = unsafe { self._positions[i].assume_init_mut() };
             *idx_dest = *idx;
         }
         self.raw[i] = Some(*x);
@@ -180,7 +179,7 @@ pub trait Hashable<Safety: PartialEq> {
 /** Automatically generated from PickMoreRelevant */
 pub trait CopyMoreRelevant: for<'a> PickMoreRelevant<'a> + Copy {
     fn copy_more_relevant(x: &Self, y: &Self) -> Self {
-        Self::pick_more_relevant(x, y).clone()
+        *Self::pick_more_relevant(x, y)
     }
 }
 impl<T: for<'a> PickMoreRelevant<'a> + Copy> CopyMoreRelevant for T {}

@@ -192,33 +192,6 @@ pub enum UciResponse<'a> {
     Option { name: &'a str, o: UciOption },
 }
 
-pub enum UciParam {
-    Info,
-    String(String),
-    Depth(usize),
-    ScoreCp(i32),
-    TimeMs(usize),
-    Variant(Vec<String>),
-}
-impl Display for UciParam {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Info => write!(f, "info"),
-            Self::String(s) => write!(f, "string {s}"),
-            Self::Depth(d) => write!(f, "depth {d}"),
-            Self::ScoreCp(s) => write!(f, "score cp {s}"),
-            Self::TimeMs(t) => write!(f, "time {t}"),
-            Self::Variant(v) => {
-                write!(f, "pv")?;
-                for m in v.into_iter().rev() {
-                    write!(f, " {m}")?
-                }
-                Ok(())
-            }
-        }
-    }
-}
-
 impl<'a> Display for UciResponse<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {

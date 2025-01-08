@@ -1,7 +1,9 @@
-use std::ops::Index;
+use std::{fmt::Display, ops::Index};
 
-use super::bitboard::{self, Bitboard, File, GenericBB};
-use super::{Player, UciNotation};
+use super::{
+    bitboard::{self, Bitboard, File, GenericBB},
+    player::Player,
+};
 
 #[derive(Copy, Clone)]
 pub enum Castle {
@@ -32,20 +34,6 @@ impl Castle {
         match self {
             Self::Short => Bitboard(File::H),
             Self::Long => Bitboard(File::A),
-        }
-    }
-}
-impl UciNotation for (&Castle, &Player) {
-    fn to_uci(&self) -> String {
-        match self.0 {
-            Castle::Short => match self.1 {
-                Player::Black => String::from("e8g8"),
-                Player::White => String::from("e1g1"),
-            },
-            Castle::Long => match self.1 {
-                Player::Black => String::from("e8c8"),
-                Player::White => String::from("e1c1"),
-            },
         }
     }
 }
