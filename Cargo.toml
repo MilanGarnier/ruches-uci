@@ -7,27 +7,18 @@ authors = ["Milan Garnier"]
 [features]
 default = ["perft", "static_attacks"]
 
-
 perft = []
+
 static_attacks = []
-
-## Logger options
-error_backtrace = []
-full_trace = []
-
 
 [dependencies]
 
-log = { version = "*" }
 futures = "0.3"
 tokio = { version = "1.42", features = ["full"] }
-derive-error = "0.0.5"
-
 
 
 [profile.release]
 opt-level = 3
-features = ["perft", "error_backtrace"]
 
 [profile.bench]
 opt-level = 3
@@ -35,10 +26,4 @@ debug = true
 debug-assertions = false
 
 [profile.dev]
-features = ["default", "error_backtrace"]
 opt-level = 3
-
-[profile.fixme] # bug hunting
-inherits = "dev"
-opt-level = 3
-features = ["dev", "full_trace"]

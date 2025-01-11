@@ -33,22 +33,20 @@ pub enum Eval {
     Approx(ApproxEval),
 }
 
-#[derive(Clone)]
 pub struct EvalState {
     pub eval: Eval,
-    pub pv: String,
+    pub pv: MoveList,
 }
 
 //// Internal defs/implementations
 
-#[derive(Clone)]
-struct MoveList<'a>(Vec<Move<'a>>);
-impl<'a> Default for MoveList<'a> {
+struct MoveList(Vec<Move>);
+impl Default for MoveList {
     fn default() -> Self {
         MoveList { 0: Vec::new() }
     }
 }
-impl<'a> Display for MoveList<'a> {
+impl Display for MoveList {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         for m in &self.0 {
             write!(f, "{m} ")?;
@@ -174,14 +172,14 @@ impl EvalState {
     }
 
     // create the evalState for the current move, knowing that the eval is the best for player
-    pub fn nest(&mut self, m: &str) {
+    pub fn nest(&mut self, m: Move) {
         self.eval = self.eval.nest();
-        self.pv.insert_str(0, m);
+        self.pv.0.push(m);
     }
     pub fn new(e: Eval) -> Self {
         Self {
             eval: e,
-            pv: String::new(),
+            pv: MoveList::default(),
         }
     }
 }

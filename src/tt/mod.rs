@@ -1,9 +1,4 @@
-use std::{
-    fmt::Debug,
-    marker::PhantomData,
-    mem::MaybeUninit,
-    sync::{Arc, RwLock},
-};
+use std::{fmt::Debug, marker::PhantomData, mem::MaybeUninit, ops::Index};
 
 use super::position::Position;
 
@@ -24,71 +19,64 @@ impl<'a> PickMoreRelevant<'a> for PerftInfo {
  * Data is located in the heap. Size has to be a power of 2
  * TODO: Object will be designed for concurrent access.
  */
-struct DebugData<IndexType> {
-    _items: usize,                           // item counter
-    _replaced: usize,                        // times when the same memory location gets written
-    _updated: usize,                         // times when the same entry gets updated
-    _positions: Vec<MaybeUninit<IndexType>>, // store full index to remove undetected collisions
-}
-impl<T> DebugData<T> {
-    fn new(n: usize) -> Self {
-        let mut v = Vec::with_capacity(n);
-        unsafe {
-            v.set_len(n);
-        }
-        Self {
-            _items: Default::default(),
-            _replaced: Default::default(),
-            _updated: Default::default(),
-            _positions: v,
-        }
-    }
-}
-
 pub struct Cache<
     X: CopyMoreRelevant + PartialEq,
-    SafetyFeature: Copy + PartialEq,
+    SafetyFeature: PartialEq,
     IndexType: Hashable<SafetyFeature> + PartialEq + Copy,
 > {
     mask: usize, // instead of %n, we do &mask for speed
-    raw: Arc<RwLock<Vec<MaybeUninit<X>>>>,
-    safety: Arc<RwLock<Vec<Option<SafetyFeature>>>>,
+    raw: Vec<Option<X>>,
+    safety: Vec<MaybeUninit<SafetyFeature>>,
+    null: Option<X>, // when a collision is detected
+
     _index_type: PhantomData<IndexType>,
-    #[cfg(debug_assertions)]
-    _debug: Arc<RwLock<DebugData<IndexType>>>,
+    #[cfg(debug_assertions)] // item counter
+    _items: usize,
+    #[cfg(debug_assertions)] // times when the same memory location gets written
+    _replaced: usize,
+    #[cfg(debug_assertions)] // times when the same entry gets updated
+    _updated: usize,
+    #[cfg(debug_assertions)] // store full index to remove undetected collisions
+    _positions: Vec<MaybeUninit<IndexType>>,
 }
-impl<
-    X: CopyMoreRelevant + PartialEq,
-    S: PartialEq + Copy,
-    I: Hashable<S> + PartialEq + Debug + Copy,
-> Cache<X, S, I>
+impl<X: CopyMoreRelevant + PartialEq, S: PartialEq, I: Hashable<S> + PartialEq + Debug + Copy>
+    Cache<X, S, I>
 {
     pub fn new(n: usize) -> Self {
-        let x = Self {
+        let mut x = Self {
             mask: compute_mask_for_size(n),
-            raw: Arc::new(RwLock::new(Vec::with_capacity(n))),
-            safety: Arc::new(RwLock::new(vec![None; n])),
+            raw: vec![None; n],
+            safety: Vec::with_capacity(n),
+            null: None,
             _index_type: PhantomData,
             #[cfg(debug_assertions)]
-            _debug: Arc::new(RwLock::new(DebugData::new(n))),
+            _items: 0,
+            #[cfg(debug_assertions)]
+            _replaced: 0,
+            #[cfg(debug_assertions)]
+            _updated: 0,
+            #[cfg(debug_assertions)]
+            _positions: Vec::with_capacity(n),
         };
         unsafe {
-            x.raw.try_write().unwrap().set_len(n);
+            x.safety.set_len(n);
+            #[cfg(debug_assertions)]
+            x._positions.set_len(n);
         };
         x
     }
 
     // Notice the cache that there is a new value for a given index, it will chose itself if it is relevant
     // TODO: optimize performance, this is not clean
-    pub fn push(&self, idx: &I, y: &X) {
-        let a = &self.index(idx);
+    pub fn push(&mut self, idx: &I, y: &X) {
+        let a = &self[idx];
         match a {
             Some(x) => {
                 if *y == *X::pick_more_relevant(x, y) {
                     #[cfg(debug_assertions)]
                     {
-                        self._debug.try_write().unwrap()._updated += 1;
-                    }
+                        self._updated += 1;
+                    };
                     self.overwrite_entry(idx, y);
                 }
             }
@@ -103,82 +91,72 @@ impl<
     pub fn print_stats(&self) {
         let elements = self.mask + 1;
         let stack = std::mem::size_of::<Self>();
-        let heap = self.raw.try_write().unwrap().capacity() * (size_of::<X>() + size_of::<S>());
-        let debug = self._debug.try_write().unwrap();
-        log!(
-            log::Level::Debug,
+        let heap = self.raw.capacity() * (size_of::<X>() + size_of::<S>());
+        println!(
             "Cache ({} elements - {} + {} Bytes (static+dynamic))",
-            elements,
-            stack,
-            heap
+            elements, stack, heap
         );
-        log!(
-            log::Level::Debug,
+        println!(
             "\tUsage : {} ({}%)",
-            debug._items,
-            debug._items as f64 / elements as f64 * 100.
+            self._items,
+            self._items as f64 / elements as f64 * 100.
         );
-        log!(
-            log::Level::Debug,
+        println!(
             "\tUpdates : {}%",
-            debug._updated as f64 / elements as f64 * 100.
+            self._updated as f64 / elements as f64 * 100.
         );
-        log!(
-            log::Level::Debug,
+        println!(
             "\tCollisions : {}%",
-            (debug._replaced - debug._updated) as f64 / elements as f64 * 100.
+            (self._replaced - self._updated) as f64 / elements as f64 * 100.
         );
     }
 
-    pub fn overwrite_entry(&self, idx: &I, x: &X) {
+    pub fn overwrite_entry(&mut self, idx: &I, x: &X) {
         let i = Self::compute_index(&self, idx);
-        self.safety.try_write().unwrap()[i] = Some(I::safety_feature(idx));
+        self.safety[i] = MaybeUninit::new(I::safety_feature(idx));
 
         #[cfg(debug_assertions)]
         {
-            match self.safety.try_write().unwrap()[i] {
-                None => self._debug.try_write().unwrap()._items += 1,
-                Some(_) => self._debug.try_write().unwrap()._replaced += 1,
+            match self.raw[i] {
+                None => self._items += 1,
+                Some(_) => self._replaced += 1,
             }
-            let mut idx_dest_lock = self._debug.try_write().unwrap();
-            let idx_dest = unsafe { idx_dest_lock._positions[i].assume_init_mut() };
+            let idx_dest = unsafe { self._positions[i].assume_init_mut() };
             *idx_dest = *idx;
         }
-        self.raw.try_write().unwrap()[i].write(*x);
+        self.raw[i] = Some(*x);
     }
 
     fn compute_index(&self, idx: &I) -> usize {
         self.mask & I::hash(idx)
     }
 }
-impl<
-    'a,
-    X: CopyMoreRelevant + PartialEq + 'a,
-    S: PartialEq + Copy,
-    Idx: Hashable<S> + PartialEq + Debug + Copy,
-> Cache<X, S, Idx>
+impl<X: CopyMoreRelevant + PartialEq, S: PartialEq, Idx: Hashable<S> + PartialEq + Debug + Copy>
+    Index<&Idx> for Cache<X, S, Idx>
 {
-    pub fn index(&'a self, index: &Idx) -> Option<&'a X> {
-        let i = self.compute_index(index);
-        match self.safety.read().unwrap()[i] {
-            Some(_) => match self.safety.read().unwrap()[i] == Some(Idx::safety_feature(index)) {
-                true => {
-                    #[cfg(debug_assertions)]
-                    {
-                        let rlock = self._debug.read().unwrap();
-                        let original_position = unsafe { rlock._positions[i].assume_init_ref() };
-                        if original_position != index {
-                            println!("A collision went undetected");
-                            println!("original : {:?}", original_position);
-                            println!("current : {:?}", index);
-                            panic!();
-                        }
-                    };
-                    unsafe { (self.raw.read().unwrap()[i].assume_init_ref() as *const X).as_ref() }
+    type Output = Option<X>;
+    fn index(&self, index: &Idx) -> &Self::Output {
+        let i = Self::compute_index(&self, index);
+        match self.raw[i] {
+            Some(_) => {
+                match *unsafe { self.safety[i].assume_init_ref() } == Idx::safety_feature(index) {
+                    true => {
+                        #[cfg(debug_assertions)]
+                        {
+                            let original_position = unsafe { self._positions[i].assume_init_ref() };
+                            if original_position != index {
+                                println!("A collision went undetected");
+                                println!("original : {:?}", original_position);
+                                println!("current : {:?}", index);
+                                panic!();
+                            }
+                        };
+                        &self.raw[i]
+                    }
+                    false => &self.null,
                 }
-                false => None,
-            },
-            None => None,
+            }
+            None => &self.null,
         }
     }
 }
@@ -215,10 +193,10 @@ const fn compute_mask_for_size(n: usize) -> usize {
 fn transposition_tables() {
     assert_eq!(compute_mask_for_size(8), 0b111);
 
-    let t = PerftCache::new(16);
+    let mut t = PerftCache::new(16);
 
     // verify starting pos is not in table
-    let r = match t.index(&Position::startingpos()) {
+    let r = match t[&Position::startingpos()] {
         None => true,
         _ => false,
     };
@@ -232,7 +210,7 @@ fn transposition_tables() {
     });
 
     assert_eq!(
-        *t.index(&Position::startingpos()).unwrap(),
+        t[&Position::startingpos()].unwrap(),
         PerftInfo {
             nodes: 20,
             depth: 1
@@ -251,7 +229,7 @@ fn transposition_tables() {
     });
 
     assert_eq!(
-        *t.index(&Position::startingpos()).unwrap(),
+        t[&Position::startingpos()].unwrap(),
         PerftInfo {
             nodes: 400,
             depth: 2
