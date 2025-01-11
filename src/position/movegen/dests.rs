@@ -5,18 +5,20 @@ use super::bitboard::Square;
 use super::bitboard::ToBB;
 
 use super::AugmentedPos;
-use super::attacks; // goal is to get rid of it
 use super::bitboard::{Bitboard as BB, Rank};
 use super::{Piece, Player};
 
-pub fn generate_king_dests(src: BB<Square>, meta: &AugmentedPos) -> BB<GenericBB> {
-    let player = meta.turn;
-    let king = src; // meta.p.pos[player].pieces[PieceN::King as usize];
-
-    // squares that arent attacked by opponent, and not occupied by my own pieces
-    let free_sq_for_king = !meta.attacked[player.other()] & !meta.occupied[player];
-
-    attacks::generate_king(king) & free_sq_for_king
+// masks forbidden destinations
+pub fn mask(p: Piece, meta: &AugmentedPos) -> BB<GenericBB> {
+    let turn = meta.turn;
+    match p {
+        Piece::Pawn => todo!(),
+        Piece::Knight => todo!(),
+        Piece::Bishop => !meta.blockers,
+        Piece::Rook => !meta.blockers,
+        Piece::Queen => !meta.blockers,
+        Piece::King => !meta.attacked[turn.other()] & !meta.occupied[turn],
+    }
 }
 
 // mask to know when to trigger en passant => check [(src | dest) & mask == (src | dest)]

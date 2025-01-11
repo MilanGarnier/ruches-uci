@@ -3,13 +3,20 @@
 #![feature(test)]
 #![feature(async_closure)]
 
-use std::{
-    io::Stdout,
-    sync::LazyLock,
-};
+#[macro_use]
+extern crate derive_error;
+#[macro_use]
+extern crate log;
 
-use uci::{UciOut, UciShell};
+pub mod prelude;
+use prelude::*;
 
+use std::sync::LazyLock;
+
+use uci::UciShell;
+
+#[macro_use]
+pub mod output_mgr;
 pub mod eval;
 pub mod localvec;
 pub mod position;
@@ -22,8 +29,8 @@ static INTERFACE: LazyLock<UciShell> = LazyLock::new(|| uci::UciShell::new());
 #[tokio::main/*(flavor = "current_thread")*/]
 
 async fn main() {
+    output_mgr::init();
     let mut args: Vec<_> = std::env::args().collect();
-
     // either single command or multiple command
     if args.len() > 2 {
         args.remove(0); // ignore path
@@ -34,10 +41,10 @@ async fn main() {
         }
         //println!("Running command {:?}", command);
         INTERFACE
-            .runcommand::<UciOut<Stdout>>(uci::parse(command).unwrap())
+            .runcommand(uci::parse(command).unwrap())
             .await
             .unwrap();
     } else {
-        INTERFACE.run::<UciOut<Stdout>>().await;
+        INTERFACE.run().await;
     }
 }

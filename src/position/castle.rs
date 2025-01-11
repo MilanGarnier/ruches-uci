@@ -1,4 +1,4 @@
-use std::{fmt::Display, ops::Index};
+use std::ops::Index;
 
 use super::{
     bitboard::{self, Bitboard, File, GenericBB},
@@ -43,33 +43,9 @@ pub struct CastleRights {
     pub x: [bool; Castle::COUNT],
 }
 
-trait Revertible<Commit>: Sized + Copy + PartialEq {
-    // with stack() then unstack() the object has to remain unchanged
-    fn stack(&mut self, c: &Commit);
-
-    /*
-    fn unstack(&mut self, c: &Commit) {
-        self.stack(c);
-    }*/
-    /*
-    // use this function only for debug purposes
-    fn assert_safety(&mut self, c : &Commit) {
-        let mut s1 = *self;
-        s1.stack(c);
-        s1.unstack(c);
-    }*/
-}
 impl PartialEq for CastleRights {
     fn eq(&self, other: &Self) -> bool {
         self.x == other.x
-    }
-}
-
-impl Revertible<CastleRights> for CastleRights {
-    fn stack(&mut self, c: &CastleRights) {
-        for (index, value) in c.x.iter().enumerate() {
-            self.x[index] ^= value;
-        }
     }
 }
 
@@ -133,9 +109,6 @@ impl CastleData {
         self.x as usize * 98466746843 // magic value
     }
 }
-
-pub const CASTLE_ALLOWED_ONE_SIDE: CastleRights = CastleRights { x: [true, true] };
-pub const CASTLE_FORBIDDEN_ONE_SIDE: CastleRights = CastleRights { x: [false, false] };
 
 pub const CASTLES_ALL_ALLOWED: CastleData = CastleData { x: 0xF };
 pub const CASTLES_ALL_FORBIDDEN: CastleData = CastleData { x: 0x0 };

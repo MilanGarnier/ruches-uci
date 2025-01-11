@@ -1,14 +1,19 @@
+use crate::prelude::*;
 pub trait Parsing {
     type Resulting: ?Sized;
     fn from_str(s: &str) -> Self::Resulting;
 }
 
+use std::fmt::{Display, Formatter};
+
 use bitboard::{BBSquare, Bitboard, File, FromBB, GenericBB, Rank, SpecialBB, Square, ToBB};
 
 use castle::{CASTLES_ALL_ALLOWED, CASTLES_ALL_FORBIDDEN, Castle, CastleData};
+use log::Level;
 use movegen::{AtomicMove, AugmentedPos, Change, Move, PartialMove, Promotion, StandardMove};
 use zobrist::{zobrist_hash_bitboard, zobrist_hash_square};
 
+use std::io::Write;
 pub mod bitboard;
 mod castle;
 pub mod movegen;
@@ -19,7 +24,7 @@ pub mod zobrist;
 use piece::Piece;
 use player::Player;
 
-use crate::uci::UciOutputStream;
+use crate::localvec::FastVec;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PieceSet {
@@ -35,6 +40,26 @@ pub struct PlayerStorage<T> {
     black: T,
     white: T,
 }
+
+pub struct PSIterator<'a, T>(u8, &'a PlayerStorage<T>);
+impl<'a, T> Iterator for PSIterator<'a, T> {
+    type Item = &'a T;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self.0 {
+            0 => {
+                self.0 += 1;
+                Some(&self.1[Player::White])
+            }
+            1 => {
+                self.0 += 1;
+                Some(&self.1[Player::Black])
+            }
+            _ => None,
+        }
+    }
+}
+
 impl<T: Copy> PlayerStorage<T> {
     #[inline(always)]
     pub fn from(x: [T; 2]) -> Self {
@@ -42,6 +67,12 @@ impl<T: Copy> PlayerStorage<T> {
             white: x[0],
             black: x[1],
         }
+    }
+}
+
+impl<'a, T> PlayerStorage<T> {
+    pub fn iter(&'a self) -> PSIterator<'a, T> {
+        PSIterator(0, &self)
     }
 }
 
@@ -281,6 +312,10 @@ impl Position {
         self.en_passant ^= mv.en_passant();
         self.half_move_count += 1;
     }
+    pub fn play(mut self, mv: &Move) -> Self {
+        self.stack(mv);
+        self
+    }
 
     pub fn unstack(&mut self, mv: &Move) {
         self.half_move_count -= 1;
@@ -290,7 +325,7 @@ impl Position {
     }
 
     // very unoptimized, should not be called when we can access the move as &mv
-    pub fn getmove(&mut self, uci: &str) -> Result<Option<Move>, ()> {
+    pub fn getmove(&self, uci: &str) -> Result<Option<Move>, ()> {
         let meta = AugmentedPos::list_issues(self);
         let moves = match meta {
             Err(()) => return Err(()),
@@ -304,10 +339,10 @@ impl Position {
         Ok(None)
     }
     #[cfg(feature = "perft")]
-    pub fn perft_top<O: UciOutputStream>(&mut self, depth: usize) -> usize {
+    pub fn perft_top(&mut self, depth: usize) -> usize {
         use crate::uci::UciResponse;
 
-        let mut cache = match depth {
+        let cache = match depth {
             0..=3 => PerftCache::new(1),
             4..=5 => PerftCache::new(1024 * 1024),
             6.. => PerftCache::new(4 * 1024 * 1024),
@@ -315,21 +350,17 @@ impl Position {
         match depth {
             0 => 0,
             _ => {
-                let r = AugmentedPos::list_issues(self);
-                let ml = match r {
-                    Err(()) => return 0,
-                    Ok(ml) => ml,
-                };
+                let sum: usize = self
+                    .map_outcomes(|p, m| {
+                        let count = p.perft_rec(depth - 1, 1, &cache);
+                        log!(log::Level::Info, "{}: {}", m, count);
+                        count
+                    })
+                    .unwrap()
+                    .iter()
+                    .map(|x| *x)
+                    .sum();
 
-                let mut sum = 0;
-                for m in ml.iter() {
-                    self.stack(m);
-                    let count = self.perft_rec(depth - 1, 1, &mut cache);
-                    O::send_response(UciResponse::Raw(format!("{}: {}", m, count).as_str()))
-                        .unwrap();
-                    sum += count;
-                    self.unstack(m);
-                }
                 #[cfg(debug_assertions)]
                 cache.print_stats();
                 sum
@@ -337,7 +368,7 @@ impl Position {
         }
     }
 
-    fn perft_rec(&mut self, depth: usize, depth_in: usize, cache: &mut PerftCache) -> usize {
+    fn perft_rec(&self, depth: usize, depth_in: usize, cache: &PerftCache) -> usize {
         match depth {
             0 => {
                 let a = AugmentedPos::list_issues(&self);
@@ -356,7 +387,7 @@ impl Position {
             _ => {
                 // minimum depth to have transpositions happening
                 if depth_in >= 4 && depth >= 2 {
-                    match cache[&self] {
+                    match cache.index(&self) {
                         Some(x) => {
                             //println!("Found entry");
                             if x.depth as usize == depth {
@@ -368,20 +399,17 @@ impl Position {
                         None => (),
                     }
                 };
-                let r = AugmentedPos::list_issues(self);
-                let ml = match r {
-                    Err(()) => return 0,
-                    Ok(ml) => ml,
-                };
-
-                let mut sum = 0;
-                for m in ml.iter() {
-                    self.stack(m);
-                    let count = self.perft_rec(depth - 1, depth_in + 1, cache);
-
-                    self.unstack(m);
-                    sum += count;
-                }
+                let sum = self
+                    .map_outcomes(|p, _m| {
+                        let count = p.perft_rec(depth - 1, 1, &cache);
+                        //O::send_response(UciResponse::Raw(format!("{}: {}", m, count).as_str()))
+                        //    .unwrap();
+                        count
+                    })
+                    .unwrap()
+                    .iter()
+                    .map(|x| *x)
+                    .sum();
                 if depth_in >= 4 && depth >= 2 {
                     cache.push(&self, &PerftInfo {
                         depth: depth as u32,
@@ -497,20 +525,64 @@ impl Position {
     }
 }
 
+impl Position {
+    pub fn map_outcomes<R: Copy, T: Fn(&Self, &Move) -> R>(
+        mut self,
+        f: T,
+    ) -> Result<FastVec<64, R>, ()> {
+        let issues =
+            AugmentedPos::list_issues(unsafe { (&self as *const Self).as_ref_unchecked() })?;
+
+        let mut r = FastVec::new();
+        for mv in issues.iter() {
+            self.stack(mv);
+            r.push(f(&self, mv));
+            self.unstack(mv);
+        }
+        Ok(r)
+    }
+    pub fn map_outcomes_slow<R: Clone, T: Fn(&Self) -> R>(mut self, f: T) -> Result<Vec<R>, ()> {
+        let issues =
+            AugmentedPos::list_issues(unsafe { (&self as *const Self).as_ref_unchecked() })?;
+
+        let mut r = Vec::new();
+        for mv in issues.iter() {
+            self.stack(mv);
+            r.push(f(&self));
+            self.unstack(mv);
+        }
+        Ok(r)
+    }
+
+    pub fn map_outcomes_slow_move<R: Clone, T: Fn(&Self, &Move) -> R>(
+        mut self,
+        f: T,
+    ) -> Result<Vec<R>, ()> {
+        let issues =
+            AugmentedPos::list_issues(unsafe { (&self as *const Self).as_ref_unchecked() })?;
+
+        let mut r = Vec::new();
+        for mv in issues.iter() {
+            self.stack(mv);
+            r.push(f(&self, mv));
+            self.unstack(mv);
+        }
+        Ok(r)
+    }
+}
+
 ////// Print functions
 
-impl Position {
+impl Display for Position {
     // TODO: replace with fen interpretation / or other
-    pub fn pretty_print<O: UciOutputStream>(&self) {
+    fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
         debug_assert_eq!(File::G.declass() & Rank::R5, Square::g5.declass());
 
         let repr = PlayerStorage::from([['♟', '♞', '♝', '♜', '♛', '♚'], [
             '♙', '♘', '♗', '♖', '♕', '♔',
         ]]);
-        O::send_response(crate::uci::UciResponse::Debug(
-            "┏━━━┯━━━┯━━━┯━━━┯━━━┯━━━┯━━━┯━━━┓ ",
-        ))
-        .unwrap();
+        writeln!(f, "┏━━━┯━━━┯━━━┯━━━┯━━━┯━━━┯━━━┯━━━┓ ")?;
+
         // dirty, but anyway
 
         for rank in 0..8 {
@@ -541,24 +613,24 @@ impl Position {
                     s = format!("{s}│");
                 }
             }
-            s = format!("{s}┃{}", 7 - rank + 1);
-            O::send_response(crate::uci::UciResponse::Debug(s.as_str())).unwrap();
+            writeln!(f, "{s}┃{}", 7 - rank + 1)?;
             if rank != 7 {
-                O::send_response(crate::uci::UciResponse::Debug(
-                    "┠───┼───┼───┼───┼───┼───┼───┼───┨ ",
-                ))
-                .unwrap();
+                writeln!(f, "┠───┼───┼───┼───┼───┼───┼───┼───┨ ")?;
             }
         }
-        O::send_response(crate::uci::UciResponse::Debug(
-            "┗━━━┷━━━┷━━━┷━━━┷━━━┷━━━┷━━━┷━━━┛ ",
-        ))
-        .unwrap();
-        O::send_response(crate::uci::UciResponse::Debug(
-            "  a   b   c   d   e   f   g   h  ",
-        ))
-        .unwrap();
-        //println!("Debug : {:#?}", AugmentedPos::create(&mut self.clone()));
+        writeln!(f, "┗━━━┷━━━┷━━━┷━━━┷━━━┷━━━┷━━━┷━━━┛ ")?;
+        writeln!(f, "  a   b   c   d   e   f   g   h  ")?;
+
+        #[cfg(debug_assertions)]
+        writeln!(f, "Debug : {:#?}", self.clone())?;
+        Ok(())
+    }
+}
+
+impl Position {
+    // TODO: replace with fen interpretation / or other
+    pub fn pretty_print(&self, l: Level) {
+        log!(l, "{}", self);
     }
 }
 
@@ -589,46 +661,45 @@ impl Position {
 #[cfg(test)]
 mod tests {
     extern crate test;
-    use std::io::Stdout;
 
     use test::Bencher;
 
-    use crate::{
-        position::{Player, movegen::AugmentedPos},
-        uci::{NullUciStream, UciOut, UciOutputStream},
-    };
+    use crate::position::{Player, movegen::AugmentedPos};
 
     use super::Position;
 
     #[cfg(feature = "perft")]
     #[bench]
     fn perft_startpos(b: &mut Bencher) {
-        use crate::uci::NullUciStream;
-
         let mut a = super::Position::startingpos();
 
-        assert_eq!(a.perft_top::<NullUciStream>(1), 20);
-        assert_eq!(a.perft_top::<NullUciStream>(2), 400);
-        assert_eq!(a.perft_top::<NullUciStream>(3), 8902);
+        assert_eq!(a.perft_top(1), 20);
+        assert_eq!(a.perft_top(2), 400);
+        assert_eq!(a.perft_top(3), 8902);
 
         let mut a = super::Position::startingpos();
         b.iter(|| {
-            assert_eq!(a.perft_top::<NullUciStream>(3), 8902);
+            assert_eq!(a.perft_top(3), 8902);
         });
+
+        assert_eq!(a.perft_top(6), 119060324);
     }
 
     #[test]
     fn zobrist() {
-        let mut a = super::Position::startingpos();
-        let ml = super::AugmentedPos::list_issues(&a).unwrap();
+        let a = super::Position::startingpos();
         let initial_hash = super::zobrist::zobrist_hash_playerstorage(&a.pos);
-        for m in ml.iter() {
-            a.stack(m);
-            assert_ne!(
-                initial_hash, a.zobrist,
-                "Hash collision detected playing a single move (should have changed)"
-            );
-            a.unstack(m);
+        for _a in a
+            .map_outcomes(|p, _m| {
+                assert_ne!(
+                    initial_hash, p.zobrist,
+                    "Hash collision detected playing a single move (should have changed)"
+                )
+            })
+            .unwrap()
+            .iter()
+        {
+            ()
         }
         assert_eq!(
             initial_hash, a.zobrist,
@@ -638,9 +709,9 @@ mod tests {
 
     #[test]
     fn captures_knight() {
-        let mut p = Position::from_fen("7k/p7/8/1N6/8/8/8/7K", "w", "-", "-", "0", "0");
+        let p = Position::from_fen("7k/p7/8/1N6/8/8/8/7K", "w", "-", "-", "0", "0");
         let x = p.getmove("b5a7").expect("Did not find capture").unwrap();
-        p.stack(&x);
+        let p = p.play(&x);
         assert_eq!(p.half_move_count, 1);
         assert_eq!(p.fifty_mv, 0);
         assert_eq!(p.turn(), Player::Black);
@@ -649,13 +720,13 @@ mod tests {
 
     #[test]
     fn captures_en_passant() {
-        let mut p = Position::from_fen("7k/8/8/8/1p6/8/P7/7K", "w", "-", "-", "0", "0");
+        let p = Position::from_fen("7k/8/8/8/1p6/8/P7/7K", "w", "-", "-", "0", "0");
         let x = p.getmove("a2a4").unwrap().unwrap();
-        p.stack(&x);
+        let p = p.play(&x);
         assert_eq!(p.half_move_count, 1);
         assert_eq!(p.fifty_mv, 0);
         let x = p.getmove("b4a3").unwrap().unwrap();
-        p.stack(&x);
+        let p = p.play(&x);
         assert_eq!(p.half_move_count, 2);
         assert_eq!(p.fifty_mv, 0);
         assert_eq!(AugmentedPos::list_issues(&p).unwrap().len(), 3);
@@ -665,17 +736,13 @@ mod tests {
     fn promotion() {
         let mut p = Position::from_fen("7k/P7/8/8/8/8/8/7K", "w", "-", "-", "0", "0");
         assert_eq!(
-            p.perft_top::<NullUciStream>(1),
+            p.perft_top(1),
             4 + 3,
             "Failed counting moves in promoting position."
         ); // 4 pieces possible + 3 king moves
         //p.perft_top::<UciOut<Stdout>>(1);
         let x = p.getmove("a7a8q").unwrap().unwrap();
-        p.stack(&x);
-        assert_eq!(
-            p.perft_top::<NullUciStream>(1),
-            2,
-            "Failed promotion to queen"
-        ); // king in check
+        let mut p = p.play(&x);
+        assert_eq!(p.perft_top(1), 2, "Failed promotion to queen"); // king in check
     }
 }
