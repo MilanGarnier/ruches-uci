@@ -3,190 +3,143 @@ pub trait Parsing {
     fn from_str(s: &str) -> Self::Resulting;
 }
 
-use bitboard::{BBSquare, Bitboard, File, FromBB, GenericBB, Rank, SpecialBB, Square, ToBB};
-
 use castle::{CASTLES_ALL_ALLOWED, CASTLES_ALL_FORBIDDEN, Castle, CastleData};
-use movegen::{AtomicMove, AugmentedPos, Change, Move, PartialMove, Promotion, StandardMove};
-use zobrist::{zobrist_hash_bitboard, zobrist_hash_square};
+use movegen::SimplifiedMove;
+pub use movegen::{AtomicMove, AugmentedPos, Change, Move, PartialMove, Promotion, StandardMove};
 
-pub mod bitboard;
+pub mod types;
+pub use types::*;
 mod castle;
 pub mod movegen;
-pub mod piece;
-pub mod player;
-pub mod zobrist;
-
-use piece::Piece;
-use player::Player;
-
+mod zobrist;
+use crate::prelude::*;
 use crate::uci::UciOutputStream;
 
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct PieceSet {
-    pawns: Bitboard<GenericBB>,
-    knights: Bitboard<GenericBB>,
-    bishops: Bitboard<GenericBB>,
-    rooks: Bitboard<GenericBB>,
-    queens: Bitboard<GenericBB>,
-    king: Bitboard<GenericBB>, // TODO: move to squares
-}
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct PlayerStorage<T> {
-    black: T,
-    white: T,
-}
-impl<T: Copy> PlayerStorage<T> {
-    #[inline(always)]
-    pub fn from(x: [T; 2]) -> Self {
-        Self {
-            white: x[0],
-            black: x[1],
-        }
-    }
-}
+pub trait PositionSpec: Sized {
+    fn startingpos() -> Self;
+    fn empty() -> Self;
 
-impl PieceSet {
-    fn occupied(&self) -> Bitboard<GenericBB> {
-        self.pawns | self.bishops | self.king | self.knights | self.queens | self.rooks
-    }
-    fn attacks(&self, player: Player, blockers: Bitboard<GenericBB>) -> Bitboard<GenericBB> {
-        movegen::attacks::generate_pawns(self[Piece::Pawn], player)
-            | movegen::attacks::generate_knights(self[Piece::Knight])
-            | movegen::attacks::generate_bishops(self[Piece::Bishop] | self[Piece::Queen], blockers)
-            | movegen::attacks::generate_rooks(self[Piece::Rook] | self[Piece::Queen], blockers)
-            | movegen::attacks::generate_king(Square::from_bb(&self[Piece::King]).unwrap())
-    }
-}
+    fn pos(&self) -> &PlayerStorage;
+    fn turn(&self) -> Player;
 
-impl std::ops::Index<Piece> for PieceSet {
-    type Output = Bitboard<GenericBB>;
-    #[inline(always)]
-    fn index(&self, index: Piece) -> &Self::Output {
-        match index {
-            Piece::Pawn => &self.pawns,
-            Piece::King => &self.king,
-            Piece::Bishop => &self.bishops,
-            Piece::Rook => &self.rooks,
-            Piece::Knight => &self.knights,
-            Piece::Queen => &self.queens,
-        }
-    }
-}
-
-impl std::ops::IndexMut<Piece> for PieceSet {
-    #[inline(always)]
-    fn index_mut(&mut self, index: Piece) -> &mut Self::Output {
-        match index {
-            Piece::Pawn => &mut self.pawns,
-            Piece::King => &mut self.king,
-            Piece::Bishop => &mut self.bishops,
-            Piece::Rook => &mut self.rooks,
-            Piece::Knight => &mut self.knights,
-            Piece::Queen => &mut self.queens,
-        }
-    }
-}
-
-type PieceData = PlayerStorage<PieceSet>;
-
-impl<T> std::ops::Index<Player> for PlayerStorage<T> {
-    type Output = T;
-    #[inline(always)]
-    fn index(&self, index: Player) -> &Self::Output {
-        match index {
-            Player::Black => &self.black,
-            Player::White => &self.white,
-        }
-    }
-}
-impl<T> std::ops::IndexMut<Player> for PlayerStorage<T> {
-    #[inline(always)]
-    fn index_mut(&mut self, index: Player) -> &mut Self::Output {
-        match index {
-            Player::Black => &mut self.black,
-            Player::White => &mut self.white,
-        }
-    }
+    fn collect_outcomes<R>(self, f: impl Fn(Self) -> R) -> Result<impl FromIterator<R>, ()>;
+    fn hash(&self) -> usize;
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Position {
     pub fifty_mv: u16,
     half_move_count: u16,
-    pos: PieceData,
+    pos: PlayerStorage,
     castles: CastleData,
     en_passant: Bitboard<GenericBB>,
-    zobrist: usize,
 }
 
-impl PieceSet {
-    fn startingpos(p: Player) -> Self {
-        PieceSet {
-            pawns: Piece::Pawn.startingpos(p),
-            knights: Piece::Knight.startingpos(p),
-            bishops: Piece::Bishop.startingpos(p),
-            rooks: Piece::Rook.startingpos(p),
-            queens: Piece::Queen.startingpos(p),
-            king: Piece::King.startingpos(p),
-        }
-    }
-    pub fn empty() -> Self {
-        PieceSet {
-            pawns: SpecialBB::Empty.declass(),
-            knights: SpecialBB::Empty.declass(),
-            bishops: SpecialBB::Empty.declass(),
-            rooks: SpecialBB::Empty.declass(),
-            queens: SpecialBB::Empty.declass(),
-            king: SpecialBB::Empty.declass(),
-        }
-    }
-}
-impl PieceData {
-    pub fn startingpos() -> Self {
-        PieceData {
-            white: PieceSet::startingpos(Player::White),
-            black: PieceSet::startingpos(Player::Black),
-        }
-    }
-    pub fn empty() -> Self {
-        PieceData {
-            white: PieceSet::empty(),
-            black: PieceSet::empty(),
-        }
-    }
-}
-
-impl Position {
-    pub fn startingpos() -> Position {
+impl PositionSpec for Position {
+    fn startingpos() -> Position {
         Position {
             half_move_count: 0,
             fifty_mv: 0,
-            pos: PieceData::startingpos(),
+            pos: PlayerStorageSpec::startingpos(),
             castles: CASTLES_ALL_ALLOWED,
             en_passant: SpecialBB::Empty.declass(),
-            zobrist: zobrist::zobrist_hash_playerstorage(&PieceData::startingpos()),
         }
     }
-    pub fn empty() -> Self {
+    fn empty() -> Self {
         Self {
             half_move_count: 0,
             fifty_mv: 0,
-            pos: PieceData::empty(),
+            pos: PlayerStorageSpec::empty(),
             castles: CASTLES_ALL_FORBIDDEN,
             en_passant: SpecialBB::Empty.declass(),
-            zobrist: zobrist::zobrist_hash_playerstorage(&PieceData::empty()),
         }
     }
-    pub fn pos(&self) -> &PieceData {
+
+    fn pos(&self) -> &PlayerStorage {
         &self.pos
     }
-    pub fn turn(&self) -> Player {
+
+    fn turn(&self) -> Player {
         match self.half_move_count % 2 {
             0 => Player::White,
             _ => Player::Black,
         }
     }
 
+    fn collect_outcomes<R>(mut self, f: impl Fn(Self) -> R) -> Result<impl FromIterator<R>, ()> {
+        let m = AugmentedPos::list_issues(&self);
+        match m {
+            Err(_) => Err(()),
+            Ok(m) => {
+                let run_f_in_environement = move |mv| -> Option<R> {
+                    self.stack(mv);
+                    // TODO: check if move legal
+                    let res = f(self);
+                    self.unstack(mv);
+                    Some(res)
+                };
+
+                let v: Vec<R> = m.iter().filter_map(run_f_in_environement).collect();
+                Ok(v)
+            }
+        }
+    }
+
+    fn hash(&self) -> usize {
+        self.pos.zobrist()
+    }
+}
+
+impl Position {
+    fn simplified_move_outcomes<R>(&mut self, ch: &SimplifiedMove) {
+        let turn = self.turn();
+        let dest_piece = self.pos.get((self.turn(), ch.dest.into()));
+
+        // en passant case
+        let en_passant = (ch.piece == Piece::Pawn) && (ch.dest.declass() == self.en_passant);
+
+        // promotion case
+        let promotion = (ch.piece == Piece::Pawn)
+            && (ch.dest.declass() & (self.turn().other().backrank())) != SpecialBB::Empty.declass();
+
+        // can be improved
+        let en_passant_change = self.en_passant ^ {
+            if (ch.dest - 2) == ch.src.declass() {
+                ch.dest - 1 // TODO: OP directly on u8
+            } else if (ch.dest + 2) == ch.src.declass() {
+                ch.dest + 1
+            } else {
+                SpecialBB::Empty.declass()
+            }
+        };
+
+        if en_passant {
+            if !ch.hint_legal {
+                // TODO: add legal checking
+            }
+            // toggle ennemy pawn
+            let en_passant_target_square = match turn.other() {
+                Player::Black => (ch.dest.declass() & self.en_passant) + 1,
+                Player::White => (ch.dest.declass() & self.en_passant) - 1,
+            }
+            .into_iter()
+            .next()
+            .unwrap();
+            self.pos
+                .remove_piece(turn.other(), Piece::Pawn, en_passant_target_square);
+        } else {
+            match self.pos.get((turn.other(), ch.dest.into())) {
+                Some(cap) => {
+                    self.pos.remove_piece(turn.other(), cap, ch.dest.into());
+                }
+                None => (),
+            }
+        }
+        self.pos
+            .move_piece(turn, ch.piece, ch.src.into(), ch.dest.into());
+    }
+
+    #[deprecated]
     fn stack_change_rev(&mut self, ch: &Change, pl: Player) {
         // en passant case
         if ch.piece() == Piece::Pawn
@@ -194,41 +147,39 @@ impl Position {
             && ch.bitboard() & self.en_passant != Bitboard(SpecialBB::Empty).declass()
         {
             // toggle ennemy pawn
-            self.pos[pl.other()][Piece::Pawn] = self.pos[pl.other()][Piece::Pawn] ^ {
+            self.pos.remove_piece(
+                pl.other(),
+                Piece::Pawn,
                 match pl.other() {
                     Player::Black => (ch.bitboard() & self.en_passant) - 1,
                     Player::White => (ch.bitboard() & self.en_passant) + 1,
                 }
-            }
+                .into_iter()
+                .next()
+                .unwrap(),
+            );
         } else {
             match ch.cap() {
                 Some(cap) => {
-                    self.pos[pl.other()][cap] ^= ch.dest();
-                    self.zobrist ^= zobrist_hash_bitboard(ch.dest().declass(), cap, pl.other());
+                    self.pos.remove_piece(pl.other(), cap, ch.dest());
                 }
                 None => (),
             }
         }
-        self.pos[pl][ch.piece()] ^= ch.bitboard();
-
-        self.zobrist ^= zobrist_hash_bitboard(ch.bitboard(), ch.piece(), pl);
+        self.pos.move_piece(pl, ch.piece(), ch.from(), ch.dest());
     }
+
     fn stack_prom_rev(&mut self, pr: &Promotion) {
         let turn = self.turn();
 
-        self.pos[turn][pr.new_piece()] ^= pr.dest();
-        self.pos[turn][Piece::Pawn] ^= pr.from();
-
+        self.pos.remove_piece(turn, Piece::Pawn, pr.from());
+        self.pos.add_new_piece(turn, pr.new_piece(), pr.dest());
         match pr.cap() {
             Some(cap) => {
-                self.pos[turn.other()][cap] ^= pr.dest();
-                self.zobrist ^= zobrist_hash_bitboard(pr.dest().declass(), cap, turn.other());
+                self.pos.remove_piece(turn.other(), cap, pr.dest());
             }
             None => (),
         }
-
-        self.zobrist ^= zobrist_hash_square(pr.dest(), pr.new_piece(), turn);
-        self.zobrist ^= zobrist_hash_square(pr.from(), Piece::Pawn, turn);
     }
     fn stack_atomic_rev(&mut self, amv: &AtomicMove) {
         match amv {
@@ -242,29 +193,44 @@ impl Position {
     }
     fn stack_castle_rev(&mut self, cs: &Castle) {
         let turn = self.turn();
-        match cs {
-            Castle::Short => {
-                let king_ch = turn.backrank().declass() & (File::E.declass() | File::G.declass());
-                let rook_ch = turn.backrank().declass() & (File::H.declass() | File::F.declass());
 
-                self.pos[turn][Piece::King] ^= king_ch;
-                self.pos[turn][Piece::Rook] ^= rook_ch;
-
-                self.zobrist ^= zobrist_hash_bitboard(king_ch, Piece::King, turn);
-                self.zobrist ^= zobrist_hash_bitboard(rook_ch, Piece::Rook, turn);
+        let king_src = (turn.backrank().declass() & File::E.declass())
+            .into_iter()
+            .next()
+            .expect("No king destination speicified for piece");
+        let king_dest = (turn.backrank().declass()
+            & match cs {
+                Castle::Short => File::G,
+                Castle::Long => File::C,
             }
-            Castle::Long => {
-                let king_ch = turn.backrank().declass() & (File::E.declass() | File::C.declass());
-                let rook_ch = turn.backrank().declass() & (File::A.declass() | File::D.declass());
+            .declass())
+        .into_iter()
+        .next()
+        .expect("No king destination speicified for piece");
 
-                self.pos[turn][Piece::King] ^= king_ch;
-                self.pos[turn][Piece::Rook] ^= rook_ch;
-
-                self.zobrist ^= zobrist_hash_bitboard(king_ch, Piece::King, turn);
-                self.zobrist ^= zobrist_hash_bitboard(rook_ch, Piece::Rook, turn);
+        let rook_src = (turn.backrank().declass()
+            & match cs {
+                Castle::Short => File::H,
+                Castle::Long => File::A,
             }
-        }
+            .declass())
+        .into_iter()
+        .next()
+        .unwrap();
+        let rook_dest = (turn.backrank().declass()
+            & match cs {
+                Castle::Short => File::F,
+                Castle::Long => File::D,
+            }
+            .declass())
+        .into_iter()
+        .next()
+        .unwrap();
+
+        self.pos.move_piece(turn, Piece::Rook, rook_src, rook_dest);
+        self.pos.move_piece(turn, Piece::Rook, king_src, king_dest);
     }
+
     fn stack_partial_rev(&mut self, pmv: &PartialMove) {
         match pmv {
             PartialMove::Std(smv) => self.stack_std_rev(smv),
@@ -456,8 +422,14 @@ impl Position {
                 '/' => sq_index -= 16,
                 p => {
                     let (player, piece) = Piece::from_notation(p).unwrap();
-                    pos.pos[player][piece] =
-                        pos.pos[player][piece] | Bitboard(GenericBB(1 << sq_index));
+                    pos.pos.add_new_piece(
+                        player,
+                        piece,
+                        Bitboard(GenericBB(1 << sq_index))
+                            .into_iter()
+                            .next()
+                            .unwrap(),
+                    );
                     sq_index = sq_index + 1;
                 }
             }
@@ -504,9 +476,9 @@ impl Position {
     pub fn pretty_print<O: UciOutputStream>(&self) {
         debug_assert_eq!(File::G.declass() & Rank::R5, Square::g5.declass());
 
-        let repr = PlayerStorage::from([['♟', '♞', '♝', '♜', '♛', '♚'], [
+        let repr = [['♟', '♞', '♝', '♜', '♛', '♚'], [
             '♙', '♘', '♗', '♖', '♕', '♔',
-        ]]);
+        ]];
         O::send_response(crate::uci::UciResponse::Debug(
             "┏━━━┯━━━┯━━━┯━━━┯━━━┯━━━┯━━━┯━━━┓ ",
         ))
@@ -525,9 +497,9 @@ impl Position {
                         for pc in 0..Piece::COUNT {
                             let pl = Player::from_usize(pl).other();
                             let pc = Piece::from_usize(pc).unwrap();
-                            if self.pos[pl][pc] & sq != SpecialBB::Empty.declass() {
+                            if self.pos[(pl, pc)] & sq != SpecialBB::Empty.declass() {
                                 printed = true;
-                                s = format!("{s}{}", repr[pl][pc as usize]);
+                                s = format!("{s}{}", repr[pl as usize][pc as usize]);
                                 break;
                             }
                         }
@@ -562,40 +534,17 @@ impl Position {
     }
 }
 
-use super::tt::{PerftCache, PerftInfo};
-impl Position {
-    /*#[cfg(debug_assertions)]
-    fn assert_squares_occupied_only_once(&self) {
-        let mut occupied = 0;
-        for bb_array in self.pos.iter() {
-            for bb in bb_array.pieces.iter() {
-                let xor = occupied ^ bb;
-                let or = occupied | bb;
-                if (xor != or) {
-                    bb_print(occupied);
-                    bb_print(*bb);
-                    bb_print(or);
-                    bb_print(xor);
-                    self.pretty_print();
-                    debug_assert_eq!(xor, or);
-                }
-
-                occupied = xor;
-            }
-        }
-    }*/
-}
-
 #[cfg(test)]
 mod tests {
     extern crate test;
-    use std::io::Stdout;
+
 
     use test::Bencher;
 
     use crate::{
+        PositionSpec,
         position::{Player, movegen::AugmentedPos},
-        uci::{NullUciStream, UciOut, UciOutputStream},
+        uci::NullUciStream,
     };
 
     use super::Position;
@@ -621,17 +570,19 @@ mod tests {
     fn zobrist() {
         let mut a = super::Position::startingpos();
         let ml = super::AugmentedPos::list_issues(&a).unwrap();
-        let initial_hash = super::zobrist::zobrist_hash_playerstorage(&a.pos);
+        let initial_hash = a.hash();
         for m in ml.iter() {
             a.stack(m);
             assert_ne!(
-                initial_hash, a.zobrist,
+                initial_hash,
+                a.hash(),
                 "Hash collision detected playing a single move (should have changed)"
             );
             a.unstack(m);
         }
         assert_eq!(
-            initial_hash, a.zobrist,
+            initial_hash,
+            a.hash(),
             "Hash has been altered in issue exploration phase"
         );
     }

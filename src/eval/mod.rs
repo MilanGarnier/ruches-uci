@@ -4,8 +4,7 @@ use std::fmt::{Display, Formatter};
 
 pub use s_count_material::MaterialBalance;
 
-use super::position;
-use super::position::{Position, movegen::Move, player::Player};
+use super::prelude::*;
 
 #[derive(Clone, Copy)]
 pub struct ApproxEval {

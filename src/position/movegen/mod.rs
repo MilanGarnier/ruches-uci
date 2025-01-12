@@ -1,20 +1,32 @@
+use crate::prelude::*;
 use std::fmt::{Debug, Display};
 
-use crate::localvec::{self, FastVec, MoveVec};
+use crate::localvec::{FastVec};
+pub type MoveVec = FastVec<64, Move>;
+use crate::piece::Piece;
 use dests::generate_next_en_passant_data;
 
-use super::bitboard::{
-    self, Bitboard, File, FromBB, GenericBB, PackedSquare, Rank, SpecialBB, Square, ToBB,
-};
 use super::castle::{self, CASTLES_KEEP_UNCHANGED, Castle, CastleData};
-use super::piece::Piece;
-use super::{Player, PlayerStorage};
+use super::Player;
+use crate::bitboard::Bitboard;
 
-use super::{PieceSet, Position};
+use super::Position;
 
 pub mod attacks;
 mod dests;
 // mod heapvec;
+
+// Pseudo legal - simplified move -> can lead to a unknown number of states
+
+pub trait TransitionSet<T> {}
+// if fits in 32 bits, relevant data is used at runtime
+// to have the legacy behaviour you could collect full moves
+pub struct SimplifiedMove {
+    pub src: Bitboard<PackedSquare>,
+    pub dest: Bitboard<PackedSquare>,
+    pub piece: Piece,
+    pub hint_legal: bool,
+}
 
 #[derive(Clone, Copy, Debug)]
 pub struct Change {
@@ -27,8 +39,8 @@ impl Change {
     pub fn encode(
         p: Piece,
         cap: Option<Piece>,
-        dest: &Bitboard<Square>,
-        from: &Bitboard<Square>,
+        dest: Bitboard<Square>,
+        from: Bitboard<Square>,
     ) -> Self {
         Self {
             p,
@@ -83,7 +95,7 @@ impl Promotion {
         from: &Bitboard<Square>,
     ) -> Self {
         Self {
-            data: Change::encode(new_p, cap, dest, from),
+            data: Change::encode(new_p, cap, *dest, *from),
         }
     }
     pub fn new_piece(&self) -> Piece {
@@ -327,31 +339,13 @@ impl<'a> Iterator for MoveIter<'a> {
     }
 }
 
-fn which_piece_on_sq(sq: Bitboard<Square>, pos: &PieceSet) -> Option<Piece> {
-    if (pos[Piece::Pawn] & sq) != SpecialBB::Empty.declass() {
-        Some(Piece::Pawn)
-    } else if (pos[Piece::Knight] & sq) != SpecialBB::Empty.declass() {
-        Some(Piece::Knight)
-    } else if (pos[Piece::Bishop] & sq) != SpecialBB::Empty.declass() {
-        Some(Piece::Bishop)
-    } else if (pos[Piece::Rook] & sq) != SpecialBB::Empty.declass() {
-        Some(Piece::Rook)
-    } else if (pos[Piece::Queen] & sq) != SpecialBB::Empty.declass() {
-        Some(Piece::Queen)
-    } else if (pos[Piece::King] & sq) != SpecialBB::Empty.declass() {
-        Some(Piece::King)
-    } else {
-        None
-    }
-}
-
 // dest has to point to a single square
 fn generate_capture_data(meta: &AugmentedPos, dest: Bitboard<Square>, p: Piece) -> Option<Piece> {
     // TODO: #[cfg(debug_assertions)] - single byte
     /*if (dest.declass() & (meta.get_occupied()[meta.opponent()] | meta.p.en_passant))
         != SpecialBB::Empty.declass()
     */
-    match which_piece_on_sq(dest, meta.semi_pos(meta.opponent())) {
+    match meta.p.pos.get(dest) {
         None => match p {
             // ghost capture, either en passant or nothing
             Piece::Pawn => match meta.p.en_passant & dest != SpecialBB::Empty.declass() {
@@ -366,7 +360,7 @@ fn generate_capture_data(meta: &AugmentedPos, dest: Bitboard<Square>, p: Piece) 
     }
 }
 
-// returns the number of atomic moves associated, typically 1 or 6
+// returns the number of atomic moves associated, typically 1 or 4
 pub fn generate_non_promoting_atmove(
     meta: &AugmentedPos,
     src: &Bitboard<Square>,
@@ -376,8 +370,8 @@ pub fn generate_non_promoting_atmove(
     AtomicMove::PieceMoved(Change::encode(
         *piece,
         generate_capture_data(meta, *dest, *piece),
-        dest,
-        src,
+        *dest,
+        *src,
     ))
 }
 
@@ -414,8 +408,8 @@ pub fn generate_castle_data(
 // return in [0/1/2]
 pub fn generate_castle_move(meta: &AugmentedPos, c: castle::Castle) -> Option<Move> {
     if meta.p.castles.fetch(meta.player(), c)  // right to castle
-    &&  meta.attacked[meta.opponent()] & (c.files() & meta.player().backrank()) == SpecialBB::Empty.declass()  // no attacks on path (including check)
-    &&  (meta.occupied[meta.player()] | meta.occupied[meta.opponent()]) & (c.free_files() & meta.player().backrank()) == SpecialBB::Empty.declass()
+    &&  meta.attacked[meta.opponent() as usize] & (c.files() & meta.player().backrank()) == SpecialBB::Empty.declass()  // no attacks on path (including check)
+    &&  (meta.p.pos.occupied(meta.player()) | meta.p.pos.occupied(meta.opponent())) & (c.free_files() & meta.player().backrank()) == SpecialBB::Empty.declass()
     // no piece on rook&king path
     {
         // forbid current player castles
@@ -446,6 +440,7 @@ fn is_legal(p: &Position, mv: &Move) -> bool {
 
 // WARNING modified to generate pseudolegal moves as well
 // return future index
+#[deprecated]
 fn add_to_move_list(p: &AugmentedPos, m: Move, movelist: &mut MoveVec) {
     let pinned = (m.src().declass() & p.pinned) != SpecialBB::Empty.declass();
     // if src is pinned and moves to a destination not pinned it will be illegal anyway
@@ -481,6 +476,35 @@ fn add_to_move_list(p: &AugmentedPos, m: Move, movelist: &mut MoveVec) {
     }
 }
 
+// -- prefilter legal, put pesudo legal remain
+fn filter_pseudo_legal(p: &AugmentedPos, mut m: SimplifiedMove) -> Option<SimplifiedMove> {
+    let pinned = (m.src.declass() & p.pinned) != SpecialBB::Empty.declass();
+    // if src is pinned and moves to a destination not pinned it will be illegal anyway
+    let pinned_dst = m.dest.declass() & p.pinned != SpecialBB::Empty.declass();
+    let is_check = p.is_check();
+
+    let mut edge_case = false;
+    // let mut known_illegal = false;
+
+    // if moving a pinned piece out of the pinned lines
+    if pinned {
+        edge_case = true;
+    }
+
+    // in check but not moving king blocking pins nor capturing source
+    if is_check && !(m.piece == Piece::King) {
+        edge_case = true;
+        if !pinned_dst && (p.p.pos.occupied(p.turn.other()) & m.dest) == SpecialBB::Empty.declass()
+        {
+            return None;
+        }
+    }
+    m.hint_legal = !edge_case;
+
+    Some(m)
+}
+
+#[deprecated]
 fn generate_non_pawn_move_data(
     meta: &AugmentedPos,
     piece: &Piece,
@@ -516,6 +540,22 @@ fn generate_non_pawn_move_data(
             );
         }
     }
+}
+
+fn generate_non_pawn_move_data_lazy<T: SquareProp>(
+    meta: &AugmentedPos,
+    piece: Piece,
+    src: Bitboard<Square>,
+    dest: Bitboard<GenericBB>,
+) -> impl Iterator {
+    dest.into_iter()
+        .map(move |sq| SimplifiedMove {
+            src: src.into(),
+            dest: sq.into(),
+            piece,
+            hint_legal: false,
+        })
+        .filter_map(|sm| filter_pseudo_legal(meta, sm))
 }
 
 pub fn generate_pawn_atmove(
@@ -568,8 +608,8 @@ pub fn generate_pawn_atmove(
 }
 
 fn generate_pawn_move_data(meta: &AugmentedPos, src: &Bitboard<Square>, movelist: &mut MoveVec) {
-    let blockers = meta.occupied[Player::White] | meta.occupied[Player::Black];
-    let captures = meta.p.en_passant | meta.occupied[meta.opponent()];
+    let blockers = meta.p.pos.occupied(Player::White) | meta.p.pos.occupied(Player::Black);
+    let captures = meta.p.en_passant | meta.p.pos.occupied(meta.opponent());
     let dests = (attacks::generate_pawns(src.declass(), meta.turn) & captures)
         | dests::pawn_move_up_nocap(*src, meta.player(), blockers);
 
@@ -601,8 +641,7 @@ fn generate_pawn_move_data(meta: &AugmentedPos, src: &Bitboard<Square>, movelist
 pub struct AugmentedPos<'a> {
     p: &'a Position, // mutable to allow to simulate pseudo legal moves, but will always return it unchanged
     turn: Player,
-    occupied: PlayerStorage<Bitboard<GenericBB>>,
-    attacked: PlayerStorage<Bitboard<GenericBB>>,
+    attacked: [Bitboard<GenericBB>; 2],
     pinned: Bitboard<GenericBB>,
 }
 
@@ -612,8 +651,7 @@ impl<'a> AugmentedPos<'a> {
         let turn = Player::from_usize((p.half_move_count % 2).into());
         let mut a = AugmentedPos {
             p: p,
-            occupied: PlayerStorage::from([SpecialBB::Empty.declass(), SpecialBB::Empty.declass()]),
-            attacked: PlayerStorage::from([SpecialBB::Empty.declass(), SpecialBB::Empty.declass()]),
+            attacked: [SpecialBB::Empty.declass(), SpecialBB::Empty.declass()],
             pinned: SpecialBB::Empty.declass(),
             turn: turn,
         };
@@ -627,29 +665,27 @@ impl<'a> AugmentedPos<'a> {
         let turn = Player::from_usize((p.half_move_count % 2).into());
         let mut a = AugmentedPos {
             p: p,
-            occupied: PlayerStorage::from([SpecialBB::Empty.declass(), SpecialBB::Empty.declass()]),
-            attacked: PlayerStorage::from([SpecialBB::Empty.declass(), SpecialBB::Empty.declass()]),
+            attacked: [SpecialBB::Empty.declass(), SpecialBB::Empty.declass()],
             pinned: SpecialBB::Empty.declass(),
             turn: turn,
         };
 
         a.compute_occupied();
 
-        let blockers = a.occupied[Player::White] | a.occupied[Player::Black];
+        let blockers = a.p.pos.occupied(Player::White) | a.p.pos.occupied(Player::Black);
 
-        a.attacked[a.turn] = a.p.pos[a.turn].attacks(a.turn, blockers);
-        if a.p.pos[a.turn.other()][Piece::King] & a.attacked[a.turn] != SpecialBB::Empty.declass() {
+        a.attacked[a.turn as usize] = a.p.pos.generate_attacks(a.turn);
+        if a.p.pos[(a.turn.other(), Piece::King)] & a.attacked[a.turn as usize]
+            != SpecialBB::Empty.declass()
+        {
             return Err(());
         } else {
             return Ok(());
         }
     }
 
-    pub const fn get_attacked(&self) -> &PlayerStorage<Bitboard<GenericBB>> {
+    pub const fn get_attacked(&self) -> &[Bitboard<GenericBB>] {
         &self.attacked
-    }
-    pub const fn get_occupied(&self) -> &PlayerStorage<Bitboard<GenericBB>> {
-        &self.occupied
     }
     pub const fn player(&self) -> Player {
         self.turn
@@ -657,28 +693,21 @@ impl<'a> AugmentedPos<'a> {
     pub const fn opponent(&self) -> Player {
         self.turn.other()
     }
-    pub fn semi_pos(&self, p: Player) -> &PieceSet {
-        &self.p.pos[p]
-    }
 
-    fn compute_occupied(&mut self) {
-        self.occupied[Player::White] = self.p.pos[Player::White].occupied();
-        self.occupied[Player::Black] = self.p.pos[Player::Black].occupied();
-    }
+    fn compute_occupied(&mut self) {}
 
     // assume occupied squares and "pins" are known
-    fn compute_attacked_gen_moves(&mut self) -> Result<localvec::MoveVec, ()> {
-        let mut movelist = localvec::MoveVec::new();
-        let blockers = self.occupied[Player::White] | self.occupied[Player::Black];
+    fn compute_attacked_gen_moves(&mut self) -> Result<MoveVec, ()> {
+        let mut movelist = MoveVec::new();
+        let blockers = self.p.pos.occupied(Player::White) | self.p.pos.occupied(Player::Black);
 
-        self.attacked[self.turn.other()] =
-            self.p.pos[self.turn.other()].attacks(self.turn.other(), blockers);
+        self.attacked[self.turn.other() as usize] = self.p.pos.generate_attacks(self.turn.other());
 
         // generate my attacks and my moves at the same time
-        self.attacked[self.turn] = {
+        self.attacked[self.turn as usize] = {
             let mut attacked = SpecialBB::Empty.declass();
-            let mask = !self.occupied[self.turn];
-            for sq in self.p.pos[self.turn][Piece::Bishop] {
+            let mask = !self.p.pos.occupied(self.turn);
+            for sq in self.p.pos[(self.turn, Piece::Bishop)] {
                 let dests = attacks::generate_bishops(sq.declass(), blockers);
                 generate_non_pawn_move_data(
                     self,
@@ -689,7 +718,7 @@ impl<'a> AugmentedPos<'a> {
                 );
                 attacked = attacked | dests;
             }
-            for sq in self.p.pos[self.turn][Piece::Queen] {
+            for sq in self.p.pos[(self.turn, Piece::Queen)] {
                 let dests = attacks::generate_queens(sq.declass(), blockers);
                 generate_non_pawn_move_data(
                     self,
@@ -700,7 +729,7 @@ impl<'a> AugmentedPos<'a> {
                 );
                 attacked = attacked | dests;
             }
-            for sq in self.p.pos[self.turn][Piece::Rook] {
+            for sq in self.p.pos[(self.turn, Piece::Rook)] {
                 let dests = attacks::generate_rooks(sq.declass(), blockers);
                 generate_non_pawn_move_data(
                     self,
@@ -711,7 +740,7 @@ impl<'a> AugmentedPos<'a> {
                 );
                 attacked = attacked | dests;
             }
-            for sq in self.p.pos[self.turn][Piece::Knight] {
+            for sq in self.p.pos[(self.turn, Piece::Knight)] {
                 let dests = attacks::generate_knights(sq.declass());
                 generate_non_pawn_move_data(
                     self,
@@ -723,29 +752,29 @@ impl<'a> AugmentedPos<'a> {
                 attacked = attacked | dests;
             }
             attacked =
-                attacked | attacks::generate_pawns(self.p.pos[self.turn][Piece::Pawn], self.turn);
+                attacked | attacks::generate_pawns(self.p.pos[(self.turn, Piece::Pawn)], self.turn);
             attacked
         };
-        if self.p.pos[self.turn.other()][Piece::King] & self.attacked[self.turn]
+        if self.p.pos[(self.turn.other(), Piece::King)] & self.attacked[self.turn as usize]
             != SpecialBB::Empty.declass()
         {
             return Err(());
         }
 
-        for pawn in self.p.pos[self.turn][Piece::Pawn] {
+        for pawn in self.p.pos[(self.turn, Piece::Pawn)] {
             generate_pawn_move_data(self, &pawn, &mut movelist);
         }
 
         {
             // king moves
-            let king = Square::from_bb(&self.p.pos[self.turn][Piece::King]).unwrap();
+            let king = Square::from_bb(&self.p.pos[(self.turn, Piece::King)]).unwrap();
             let king_dests = dests::generate_king_dests(king, self);
             generate_non_pawn_move_data(self, &Piece::King, &king, &king_dests, &mut movelist);
         }
 
         {
             // castles
-            match generate_castle_move(self, castle::Castle::Short) {
+            match generate_castle_move(self, Castle::Short) {
                 Some(c) => add_to_move_list(self, c, &mut movelist),
                 _ => (),
             }
@@ -764,43 +793,45 @@ impl<'a> AugmentedPos<'a> {
         // opponent pieces that cannot become SpecialBB::Empty.declass() square after my next move
         let opp = self.opponent();
 
-        let king = self.p.pos[opp.other()][Piece::King];
+        let king = self.p.pos[(opp.other(), Piece::King)];
 
-        let pseudo_blockers = self.occupied[opp]; // & !(en_passant_pawns));
+        let pseudo_blockers = self.p.pos.occupied(opp); // & !(en_passant_pawns));
         let sliding_attacks = attacks::generate_bishops(
-            self.p.pos[opp][Piece::Bishop] | self.p.pos[opp][Piece::Queen],
+            self.p.pos[(opp, Piece::Bishop)] | self.p.pos[(opp, Piece::Queen)],
             pseudo_blockers,
         ) | attacks::generate_rooks(
-            self.p.pos[opp][Piece::Rook] | self.p.pos[opp][Piece::Queen],
+            self.p.pos[(opp, Piece::Rook)] | self.p.pos[(opp, Piece::Queen)],
             pseudo_blockers,
         );
         self.pinned = if sliding_attacks & king != SpecialBB::Empty.declass() {
             // there are pins coming from the king pos, extract them by reversing propag
-            let trajectories =
-                attacks::generate_queens(king, self.occupied[opp] | self.occupied[opp.other()]);
+            let trajectories = attacks::generate_queens(
+                king,
+                self.p.pos.occupied(opp) | self.p.pos.occupied(opp.other()),
+            );
             trajectories & sliding_attacks | king
         } else {
             SpecialBB::Empty.declass()
         }
     }
     pub fn is_check(&self) -> bool {
-        self.attacked[self.opponent()] & self.p.pos()[self.player()][Piece::King]
-            != SpecialBB::Empty.declass()
+        let x = self.p.pos()[(self.player(), Piece::King)];
+        self.attacked[self.opponent() as usize] & x != SpecialBB::Empty.declass()
     }
     // is opponent already in check
     // this could only come from a pin that is broken
     pub fn is_illegal(p: &Position) -> bool {
-        let blockers = p.pos[Player::White].occupied() | p.pos[Player::Black].occupied();
+        let blockers = p.pos.occupied(Player::White) | p.pos.occupied(Player::Black);
         let relevant_attacks = attacks::generate_bishops(
-            p.pos[p.turn()][Piece::Bishop] | p.pos[p.turn()][Piece::Queen],
+            p.pos[(p.turn(), Piece::Bishop)] | p.pos[(p.turn(), Piece::Queen)],
             blockers,
         ) | attacks::generate_rooks(
-            p.pos[p.turn()][Piece::Rook] | p.pos[p.turn()][Piece::Queen],
+            p.pos[(p.turn(), Piece::Rook)] | p.pos[(p.turn(), Piece::Queen)],
             blockers,
-        ) | attacks::generate_knights(p.pos[p.turn()][Piece::Knight])
-            | attacks::generate_pawns(p.pos[p.turn()][Piece::Pawn], p.turn());
+        ) | attacks::generate_knights(p.pos[(p.turn(), Piece::Knight)])
+            | attacks::generate_pawns(p.pos[(p.turn(), Piece::Pawn)], p.turn());
         let is_king_attacked =
-            p.pos[p.turn().other()][Piece::King] & relevant_attacks != SpecialBB::Empty.declass();
+            p.pos[(p.turn().other(), Piece::King)] & relevant_attacks != SpecialBB::Empty.declass();
         /*#[cfg(debug_assertions)]
         {
             let p = p.clone();

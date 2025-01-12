@@ -26,8 +26,9 @@ impl Search for MiniMaxMVP {
 use std::time::Duration;
 
 use crate::{
+    AugmentedPos, PositionSpec,
     eval::{ApproxEval, BasicEvaluation, Eval, EvalState},
-    position::{Position, movegen::AugmentedPos},
+    position::Position,
     uci::{UciOutputStream, UciResponse},
 };
 

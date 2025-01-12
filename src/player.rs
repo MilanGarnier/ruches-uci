@@ -1,7 +1,30 @@
-use crate::position::Rank;
-use crate::position::bitboard::Bitboard;
+use enum_iterator::Sequence;
 
-#[derive(Clone, Copy, PartialEq, Debug)]
+use crate::prelude::*;
+
+// statically defined player
+
+pub trait ColorTr {
+    fn side() -> Player;
+}
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct WhiteS;
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct BlackS;
+impl ColorTr for WhiteS {
+    fn side() -> Player {
+        Player::White
+    }
+}
+impl ColorTr for BlackS {
+    fn side() -> Player {
+        Player::Black
+    }
+}
+
+// dynamically defined player
+
+#[derive(Clone, Copy, PartialEq, Debug, Sequence)]
 pub enum Player {
     White,
     Black,

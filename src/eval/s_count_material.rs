@@ -1,9 +1,6 @@
 use super::Eval;
 use super::Player;
-
-use super::position::PieceSet;
-use super::position::Position;
-use super::position::piece::Piece;
+use crate::prelude::*;
 
 use super::BasicEvaluation;
 
@@ -31,27 +28,22 @@ impl Piece {
     }
 }
 
-fn held_value(pp: &PieceSet, p: Piece) -> usize {
-    pp[p].count() * p.value()
-}
-fn player_material(pp: &PieceSet) -> usize {
-    held_value(pp, Piece::Pawn)
-        + held_value(pp, Piece::Knight)
-        + held_value(pp, Piece::Bishop)
-        + held_value(pp, Piece::Rook)
-        + held_value(pp, Piece::Queen)
-}
-
-// TODO get rid of it
+// TODO get rid of it when switching to parallel
 pub static mut NODES: usize = 0;
 
 fn eval_fn(p: &Position) -> Eval {
     unsafe { NODES += 1 };
-    let p = p.pos();
-    let x =
-        player_material(&p[Player::White]) as isize - player_material(&p[Player::Black]) as isize;
+    use enum_iterator::all;
+    let a = all::<Player>()
+        .zip(all::<Piece>())
+        .map(|(pl, pc)| -> isize {
+            let ps = p.pos();
+            let bb = ps[(pl, pc)];
+            (1 - 2 * (pl as isize)) * (bb.into_iter().count() as isize)
+        });
+    let s: isize = a.sum();
     Eval::Approx(super::ApproxEval {
-        cp: i32::try_from(x).unwrap(),
+        cp: i32::try_from(s).unwrap(),
         depth: 0,
     })
 }

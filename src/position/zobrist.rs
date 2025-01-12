@@ -1,21 +1,17 @@
+use crate::position::Piece;
+use crate::prelude::*;
 /** Zobrist hashing : Zobrist hashing algorithm for Position, AugmentedPos.
  * This implements the Hashable trait. The safety feature is the moveCount+castleRights (basic) for now
  */
-use super::super::tt::Hashable;
-
-use super::{
-    PieceSet, Player, PlayerStorage, Position,
-    bitboard::{Bitboard, GenericBB, Square, ToBB64},
-    piece::Piece,
-};
+use crate::tt::Hashable;
 
 impl Hashable<usize> for Position {
     fn hash(x: &Self) -> usize {
-        x.zobrist
+        x.pos.zobrist()
     }
 
     fn safety_feature(x: &Self) -> usize {
-        x.zobrist
+        x.pos.zobrist()
             ^ (x.castles.hash() * 4654987)
             ^ (x.half_move_count as usize * 98798462468384)
             ^ x.en_passant.to_bb64() as usize
@@ -25,20 +21,6 @@ impl Hashable<usize> for Position {
 }
 
 type ZobristSeed = [[[usize; Player::COUNT]; Piece::COUNT]; Square::COUNT];
-
-pub fn zobrist_hash_playerstorage(ps: &PlayerStorage<PieceSet>) -> usize {
-    zobrist_hash_pieceset(&ps[Player::White], Player::White)
-        ^ zobrist_hash_pieceset(&ps[Player::Black], Player::Black)
-}
-
-fn zobrist_hash_pieceset(pc: &PieceSet, pl: Player) -> usize {
-    zobrist_hash_bitboard(pc[Piece::Pawn], Piece::Pawn, pl)
-        ^ zobrist_hash_bitboard(pc[Piece::Knight], Piece::Knight, pl)
-        ^ zobrist_hash_bitboard(pc[Piece::Bishop], Piece::Bishop, pl)
-        ^ zobrist_hash_bitboard(pc[Piece::Rook], Piece::Rook, pl)
-        ^ zobrist_hash_bitboard(pc[Piece::Queen], Piece::Queen, pl)
-        ^ zobrist_hash_bitboard(pc[Piece::King], Piece::King, pl)
-}
 
 pub fn zobrist_hash_bitboard(bb: Bitboard<GenericBB>, pc: Piece, pl: Player) -> usize {
     let mut hash = 0;
@@ -64,7 +46,7 @@ pub fn random_zobrist_seed() -> ZobristSeed {
     z
 }
 
-const ZOBRIST_SEED: ZobristSeed = [
+pub const ZOBRIST_SEED: ZobristSeed = [
     [
         [17544820912686652937, 12214652826354034474],
         [1892884916427657878, 6505469460538584664],

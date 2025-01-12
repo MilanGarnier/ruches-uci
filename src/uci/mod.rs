@@ -1,6 +1,6 @@
 use std::{
     fmt::Display,
-    io::{Stdout, Write, stdin, stdout},
+    io::{Write, stdin, stdout},
     marker::PhantomData,
     ops::{Deref, DerefMut},
     sync::{Arc, Mutex},
@@ -10,7 +10,7 @@ use std::{
 use futures::channel::oneshot::{Sender, channel};
 use tokio::task::JoinHandle;
 
-use crate::{eval::MaterialBalance, position::Position, search::Search};
+use crate::{PositionSpec, eval::MaterialBalance, position::Position, search::Search};
 
 const BUILD_NAME: &str = env!("CARGO_PKG_NAME");
 const BUILD_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -234,7 +234,7 @@ impl UciShell {
             let mut line = String::new();
             stdin().read_line(&mut line).unwrap();
             let command = parse(line).unwrap();
-            // .await.expect("Can't read line").unwrap();
+            //.await.expect("Can't read line").unwrap();
 
             let res = self.runcommand::<Out>(command).await;
 
@@ -342,7 +342,7 @@ impl UciShell {
                     let c = self.position.lock().unwrap().perft_top::<Out>(i);
                     Out::send_response(UciResponse::Raw(""))?;
                     Out::send_response(UciResponse::Raw(
-                        format!("Nodes searched : {}", c).as_str(),
+                        format!("Nodes searched: {}", c).as_str(),
                     ))?;
                     Out::send_response(UciResponse::Raw(""))?;
                 }

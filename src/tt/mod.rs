@@ -1,5 +1,7 @@
 use std::{fmt::Debug, marker::PhantomData, mem::MaybeUninit, ops::Index};
 
+use crate::PositionSpec;
+
 use super::position::Position;
 
 // TODO: move in specialized perft submodule
@@ -184,7 +186,7 @@ pub trait CopyMoreRelevant: for<'a> PickMoreRelevant<'a> + Copy {
 }
 impl<T: for<'a> PickMoreRelevant<'a> + Copy> CopyMoreRelevant for T {}
 
-const fn compute_mask_for_size(n: usize) -> usize {
+fn compute_mask_for_size(n: usize) -> usize {
     assert!(n.is_power_of_two(), "N should be a power of 2");
     n - 1
 }

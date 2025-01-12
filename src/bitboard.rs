@@ -10,20 +10,31 @@ pub type bb64 = u64;
 ///     You will get in exchange all functions within the BitboardUnsafeOps trait (as well as op overloading)
 /// To provide BitboardOpsKeepProperty, implement the FromBB64 trait
 /// TODO: replace the bb64 type by implementing const add, shift etc.
+
+trait Sealed {}
+
+pub trait BitboardSpec: ToBB64 + Sized + Sealed {}
+impl<T: ToBB64 + Sized + Sealed> BitboardSpec for T {}
+impl<T: BitboardSpec> Sealed for Bitboard<T> {}
+
+/// Square property
+pub trait SquareProp: Into<Bitboard<Square>> {}
+impl<T: Into<Bitboard<Square>>> SquareProp for T {}
+
 #[derive(Clone, Copy)]
-pub struct Bitboard<T>(pub T);
+pub struct Bitboard<T: BitboardSpec>(pub T);
 
 pub trait ToBB64 {
     fn to_bb64(&self) -> bb64;
 }
-impl<T: ToBB64> ToBB64 for Bitboard<T> {
+impl<T: BitboardSpec> ToBB64 for Bitboard<T> {
     #[inline(always)]
     fn to_bb64(&self) -> bb64 {
         self.0.to_bb64()
     }
 }
 
-impl<T: ToBB64> PartialEq for Bitboard<T> {
+impl<T: BitboardSpec> PartialEq for Bitboard<T> {
     #[inline(always)]
     fn eq(&self, x: &Bitboard<T>) -> bool {
         self.to_bb64() == x.to_bb64()
@@ -45,10 +56,10 @@ pub trait FromBB64<T, U: ToBB64> {
     fn from_bb64(_: &U) -> Option<T>;
 }
 
-pub trait ToBB: ToBB64 {
+pub trait ToBB: BitboardSpec {
     #[inline(always)]
-    fn bb(&self) -> Bitboard<&Self> {
-        return Bitboard(&self);
+    fn bb(self) -> Bitboard<Self> {
+        return Bitboard(self);
     }
     #[inline(always)]
     fn declass(&self) -> Bitboard<GenericBB> {
@@ -56,11 +67,11 @@ pub trait ToBB: ToBB64 {
     }
 }
 
-impl<T: ToBB64> ToBB for T {}
-pub trait FromBB<T: ToBB64 + FromBB64<T, U>, U: ToBB64> {
+impl<T: BitboardSpec> ToBB for T {}
+pub trait FromBB<T: BitboardSpec + FromBB64<T, U>, U: ToBB64> {
     fn from_bb(x: &U) -> Option<Bitboard<T>>;
 }
-impl<T: Copy + ToBB64 + FromBB64<T, U>, U: ToBB64 + Clone> FromBB<T, U> for Bitboard<T> {
+impl<T: Copy + BitboardSpec + FromBB64<T, U>, U: ToBB64 + Clone> FromBB<T, U> for Bitboard<T> {
     fn from_bb(x: &U) -> Option<Bitboard<T>> {
         match T::from_bb64(x) {
             None => None,
@@ -76,7 +87,7 @@ pub struct GenericBB(pub bb64);
 /// enum Rank
 /// enum Square
 /// enum PackedSquare
-
+impl Sealed for SpecialBB {}
 impl ToBB64 for SpecialBB {
     #[inline(always)]
     fn to_bb64(&self) -> bb64 {
@@ -84,12 +95,16 @@ impl ToBB64 for SpecialBB {
         //unsafe { std::mem::transmute(self) }
     }
 }
+
+impl Sealed for GenericBB {}
 impl ToBB64 for GenericBB {
     #[inline(always)]
     fn to_bb64(&self) -> bb64 {
         self.0 as bb64
     }
 }
+
+impl Sealed for Square {}
 impl ToBB64 for Square {
     #[inline(always)]
     fn to_bb64(&self) -> bb64 {
@@ -97,6 +112,8 @@ impl ToBB64 for Square {
         //unsafe { std::mem::transmute(self) }
     }
 }
+
+impl Sealed for Rank {}
 impl ToBB64 for Rank {
     #[inline(always)]
     fn to_bb64(&self) -> bb64 {
@@ -104,6 +121,8 @@ impl ToBB64 for Rank {
         //unsafe { std::mem::transmute(self) }
     }
 }
+
+impl Sealed for File {}
 impl ToBB64 for File {
     #[inline(always)]
     fn to_bb64(&self) -> bb64 {
@@ -112,7 +131,7 @@ impl ToBB64 for File {
     }
 }
 
-pub trait BitboardFastOps<T: ToBB64>: ToBB64 {
+pub trait BitboardFastOps: BitboardSpec {
     #[inline(always)]
     fn lsu(&self) -> Bitboard<GenericBB> {
         Bitboard(GenericBB(self.to_bb64() << 8))
@@ -135,17 +154,17 @@ pub trait BitboardFastOps<T: ToBB64>: ToBB64 {
         ))
     }
     #[inline(always)]
-    fn fn_bitand(&self, rhs: &T) -> Bitboard<GenericBB> {
+    fn fn_bitand(&self, rhs: &impl ToBB64) -> Bitboard<GenericBB> {
         Bitboard(GenericBB(self.to_bb64() & rhs.to_bb64()))
     }
 
     #[inline(always)]
-    fn fn_bitor(&self, rhs: &T) -> Bitboard<GenericBB> {
+    fn fn_bitor(&self, rhs: &impl ToBB64) -> Bitboard<GenericBB> {
         Bitboard(GenericBB(self.to_bb64() | rhs.to_bb64()))
     }
 
     #[inline(always)]
-    fn fn_bitxor(&self, rhs: &T) -> Bitboard<GenericBB> {
+    fn fn_bitxor(&self, rhs: &impl ToBB64) -> Bitboard<GenericBB> {
         Bitboard(GenericBB(self.to_bb64() ^ rhs.to_bb64()))
     }
 
@@ -155,17 +174,29 @@ pub trait BitboardFastOps<T: ToBB64>: ToBB64 {
     }
 }
 
-impl<T: ToBB64, U: ToBB64> BitboardFastOps<T> for U {}
+impl<U: BitboardSpec> BitboardFastOps for U {}
+
+pub struct BitSet(bb64);
+
+impl<T: BitboardSpec> IntoIterator for Bitboard<T> {
+    type Item = Bitboard<Square>;
+
+    type IntoIter = BitSet;
+
+    fn into_iter(self) -> Self::IntoIter {
+        BitSet(self.to_bb64())
+    }
+}
 
 // Iterate over squares contained into any bitboard
-impl Iterator for Bitboard<GenericBB> {
+impl Iterator for BitSet {
     type Item = Bitboard<Square>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let a = self.to_bb64() & (self.to_bb64().wrapping_sub(1));
-        let ex = a ^ self.to_bb64();
+        let a = self.0 & (self.0.wrapping_sub(1));
+        let ex = a ^ self.0;
 
-        self.0.0 = a;
+        self.0 = a;
 
         if ex == Bitboard(SpecialBB::Empty).to_bb64() {
             None
@@ -179,7 +210,7 @@ impl Iterator for Bitboard<GenericBB> {
     }
 }
 
-impl<U: ToBB64> std::ops::BitAnd<U> for Bitboard<GenericBB> {
+impl<U: BitboardSpec> std::ops::BitAnd<U> for Bitboard<GenericBB> {
     type Output = Bitboard<GenericBB>;
     #[inline(always)]
     fn bitand(self, rhs: U) -> Self::Output {
@@ -187,7 +218,7 @@ impl<U: ToBB64> std::ops::BitAnd<U> for Bitboard<GenericBB> {
     }
 }
 
-impl<U: ToBB64> std::ops::BitAndAssign<U> for Bitboard<GenericBB> {
+impl<U: BitboardSpec> std::ops::BitAndAssign<U> for Bitboard<GenericBB> {
     fn bitand_assign(&mut self, rhs: U) {
         self.0.0 &= rhs.to_bb64()
     }
@@ -211,7 +242,7 @@ impl std::ops::BitAnd<Bitboard<Rank>> for Bitboard<File> {
     }
 }
 
-impl<T: ToBB64, U: ToBB64> std::ops::BitOr<U> for Bitboard<T> {
+impl<T: BitboardSpec, U: BitboardSpec> std::ops::BitOr<U> for Bitboard<T> {
     type Output = Bitboard<GenericBB>;
     #[inline(always)]
     fn bitor(self, rhs: U) -> Self::Output {
@@ -219,13 +250,13 @@ impl<T: ToBB64, U: ToBB64> std::ops::BitOr<U> for Bitboard<T> {
     }
 }
 
-impl<U: ToBB64> std::ops::BitOrAssign<U> for Bitboard<GenericBB> {
+impl<U: BitboardSpec> std::ops::BitOrAssign<U> for Bitboard<GenericBB> {
     fn bitor_assign(&mut self, rhs: U) {
         self.0.0 |= rhs.to_bb64()
     }
 }
 
-impl<T: ToBB64, U: ToBB64> std::ops::BitXor<Bitboard<U>> for Bitboard<T> {
+impl<T: BitboardSpec, U: BitboardSpec> std::ops::BitXor<Bitboard<U>> for Bitboard<T> {
     type Output = Bitboard<GenericBB>;
     #[inline(always)]
     fn bitxor(self, rhs: Bitboard<U>) -> Self::Output {
@@ -233,26 +264,26 @@ impl<T: ToBB64, U: ToBB64> std::ops::BitXor<Bitboard<U>> for Bitboard<T> {
     }
 }
 
-impl<U: ToBB64> std::ops::BitXorAssign<U> for Bitboard<GenericBB> {
+impl<U: BitboardSpec> std::ops::BitXorAssign<U> for Bitboard<GenericBB> {
     fn bitxor_assign(&mut self, rhs: U) {
         self.0.0 ^= rhs.to_bb64()
     }
 }
 
-impl<T: ToBB64> std::ops::Not for Bitboard<T> {
+impl<T: BitboardSpec> std::ops::Not for Bitboard<T> {
     type Output = Bitboard<GenericBB>;
     #[inline(always)]
     fn not(self) -> Self::Output {
-        <Bitboard<T> as BitboardFastOps<T>>::fn_bitnot(&self)
+        self.fn_bitnot()
     }
 }
-impl<T: ToBB64> std::ops::Shl<usize> for Bitboard<T> {
+impl<T: BitboardSpec> std::ops::Shl<usize> for Bitboard<T> {
     type Output = Bitboard<GenericBB>;
     #[inline(always)]
     fn shl(self, rhs: usize) -> Self::Output {
         let mut o = self.declass();
         for _i in 0..rhs {
-            o = <Bitboard<GenericBB> as BitboardFastOps<T>>::lsl(&o);
+            o = self.lsl();
         }
         o
     }
@@ -261,7 +292,7 @@ impl<T: ToBB64> std::ops::Shl<usize> for Bitboard<T> {
 impl std::ops::ShlAssign<usize> for Bitboard<GenericBB> {
     fn shl_assign(&mut self, rhs: usize) {
         for _i in 0..rhs {
-            self.0.0 = <Bitboard<GenericBB> as BitboardFastOps<GenericBB>>::lsl(self).to_bb64();
+            *self = self.lsl();
         }
     }
 }
@@ -269,7 +300,7 @@ impl std::ops::ShlAssign<usize> for Bitboard<GenericBB> {
 impl std::ops::ShrAssign<usize> for Bitboard<GenericBB> {
     fn shr_assign(&mut self, rhs: usize) {
         for _i in 0..rhs {
-            self.0.0 = <Bitboard<GenericBB> as BitboardFastOps<GenericBB>>::lsr(self).to_bb64();
+            *self = self.lsr();
         }
     }
 }
@@ -277,7 +308,7 @@ impl std::ops::ShrAssign<usize> for Bitboard<GenericBB> {
 impl std::ops::AddAssign<usize> for Bitboard<GenericBB> {
     fn add_assign(&mut self, rhs: usize) {
         for _i in 0..rhs {
-            self.0.0 = <Bitboard<GenericBB> as BitboardFastOps<GenericBB>>::lsu(self).to_bb64();
+            *self = self.lsu();
         }
     }
 }
@@ -285,48 +316,48 @@ impl std::ops::AddAssign<usize> for Bitboard<GenericBB> {
 impl std::ops::SubAssign<usize> for Bitboard<GenericBB> {
     fn sub_assign(&mut self, rhs: usize) {
         for _i in 0..rhs {
-            self.0.0 = <Bitboard<GenericBB> as BitboardFastOps<GenericBB>>::lsd(self).to_bb64();
+            *self = self.lsd();
         }
     }
 }
 
-impl<T: ToBB64> std::ops::Shr<usize> for Bitboard<T> {
+impl<T: BitboardSpec> std::ops::Shr<usize> for Bitboard<T> {
     type Output = Bitboard<GenericBB>;
     #[inline(always)]
     fn shr(self, rhs: usize) -> Self::Output {
         let mut o = self.declass();
         for _i in 0..rhs {
-            o = <Bitboard<GenericBB> as BitboardFastOps<T>>::lsr(&o);
+            o = self.lsr();
         }
         o
     }
 }
 
-impl<T: ToBB64> std::ops::Add<usize> for Bitboard<T> {
+impl<T: BitboardSpec> std::ops::Add<usize> for Bitboard<T> {
     type Output = Bitboard<GenericBB>;
     #[inline(always)]
     fn add(self, rhs: usize) -> Self::Output {
         let mut o = self.declass();
         for _i in 0..rhs {
-            o = <Bitboard<GenericBB> as BitboardFastOps<GenericBB>>::lsu(&o);
+            o = self.lsu();
         }
         o
     }
 }
 
-impl<T: ToBB64> std::ops::Sub<usize> for Bitboard<T> {
+impl<T: BitboardSpec> std::ops::Sub<usize> for Bitboard<T> {
     type Output = Bitboard<GenericBB>;
     #[inline(always)]
     fn sub(self, rhs: usize) -> Self::Output {
         let mut o = self.declass();
         for _i in 0..rhs {
-            o = <Bitboard<GenericBB> as BitboardFastOps<GenericBB>>::lsd(&o);
+            o = self.lsd();
         }
         o
     }
 }
 
-impl<T: Display + ToBB64> Display for Bitboard<T> {
+impl<T: Display + BitboardSpec> Display for Bitboard<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.0)
     }
@@ -396,13 +427,13 @@ impl Display for Bitboard<PackedSquare> {
     }
 }
 
-impl<T: ToBB64> FromBB64<Square, T> for Square {
+impl<T: BitboardSpec> FromBB64<Square, T> for Square {
     unsafe fn from_bb64_nochecks(b: &T) -> Self {
         unsafe { std::mem::transmute(b.to_bb64()) }
     }
 
     fn from_bb64(b: &T) -> Option<Self> {
-        if Bitboard(GenericBB(b.to_bb64())).count() == 1 {
+        if Bitboard(GenericBB(b.to_bb64())).into_iter().count() == 1 {
             unsafe { Some(Self::from_bb64_nochecks(b)) }
         } else {
             None
@@ -410,7 +441,7 @@ impl<T: ToBB64> FromBB64<Square, T> for Square {
     }
 }
 
-impl<T: ToBB64> FromBB<Square, T> for Square {
+impl<T: BitboardSpec> FromBB<Square, T> for Square {
     fn from_bb(x: &T) -> Option<Bitboard<Square>> {
         let x = GenericBB(x.to_bb64());
         match Square::from_bb64(&Bitboard(x)) {
@@ -586,11 +617,16 @@ impl Bitboard<Square> {
         (self.0 as u64).trailing_zeros() as u8
     }
     pub fn from_index(x: u8) -> Bitboard<Square> {
-        assert!(x < 64);
+        debug_assert!(x < 64);
         unsafe { std::mem::transmute((1 as u64) << x) }
     }
     pub fn generic_from_index(x: u8) -> Bitboard<GenericBB> {
         Bitboard(GenericBB(1 << x))
+    }
+}
+impl From<Bitboard<PackedSquare>> for Bitboard<Square> {
+    fn from(value: Bitboard<PackedSquare>) -> Self {
+        Self::from_index(value.0 as u8)
     }
 }
 
@@ -666,6 +702,7 @@ pub enum PackedSquare {
 impl PackedSquare {
     pub const COUNT: usize = 64;
 }
+impl Sealed for PackedSquare {}
 impl ToBB64 for PackedSquare {
     fn to_bb64(&self) -> bb64 {
         let x = *self as u8;
@@ -678,17 +715,12 @@ impl From<u8> for Bitboard<PackedSquare> {
         unsafe { std::mem::transmute(x) }
     }
 }
-impl From<&Bitboard<Square>> for Bitboard<PackedSquare> {
-    fn from(value: &Bitboard<Square>) -> Self {
+impl From<Bitboard<Square>> for Bitboard<PackedSquare> {
+    fn from(value: Bitboard<Square>) -> Self {
         Self::from(value.to_index())
     }
 }
 impl Into<Bitboard<Square>> for &Bitboard<PackedSquare> {
-    fn into(self) -> Bitboard<Square> {
-        Bitboard::<Square>::from_index(self.0 as u8)
-    }
-}
-impl Into<Bitboard<Square>> for Bitboard<PackedSquare> {
     fn into(self) -> Bitboard<Square> {
         Bitboard::<Square>::from_index(self.0 as u8)
     }

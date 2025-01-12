@@ -2,9 +2,8 @@ use std::random;
 use std::sync::LazyLock;
 use std::time::{Duration, Instant};
 
-use crate::position::bitboard::{Bitboard, File, FromBB, GenericBB, Rank, SpecialBB, Square, ToBB};
-
 use super::dyn_attacks;
+pub use crate::prelude::*;
 
 const TS_ROOK: usize = 2 * 4096; // optimum is 2**12 = 4096
 const TS_BISHOP: usize = 2 * 512; // optimum is 2**9 = 512
@@ -482,8 +481,7 @@ mod tests {
     extern crate test;
     use test::Bencher;
 
-    use crate::position::bitboard::{Bitboard, GenericBB, ToBB};
-
+    use crate::prelude::*;
     #[bench]
     fn reference_random_square_random_blockers(b: &mut Bencher) {
         b.iter(|| {

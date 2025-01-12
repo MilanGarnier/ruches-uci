@@ -1,9 +1,6 @@
-use std::{fmt::Display, ops::Index};
+use std::ops::Index;
 
-use super::{
-    bitboard::{self, Bitboard, File, GenericBB},
-    player::Player,
-};
+use crate::prelude::*;
 
 #[derive(Copy, Clone)]
 pub enum Castle {
@@ -142,15 +139,15 @@ pub const CASTLES_ALL_FORBIDDEN: CastleData = CastleData { x: 0x0 };
 
 pub const CASTLES_KEEP_UNCHANGED: CastleData = CASTLES_ALL_FORBIDDEN;
 
-pub const CASTLE_FILES_SHORT: bitboard::Bitboard<GenericBB> = Bitboard(GenericBB(
+pub const CASTLE_FILES_SHORT: Bitboard<GenericBB> = Bitboard(GenericBB(
     File::E.bitboard() | File::F.bitboard() | File::G.bitboard(),
 ));
-pub const CASTLE_FILES_LONG: bitboard::Bitboard<GenericBB> = Bitboard(GenericBB(
+pub const CASTLE_FILES_LONG: Bitboard<GenericBB> = Bitboard(GenericBB(
     File::C.bitboard() | File::D.bitboard() | File::E.bitboard(),
 ));
 
-pub const CASTLE_FILES_SHORT_FREE: bitboard::Bitboard<GenericBB> =
+pub const CASTLE_FILES_SHORT_FREE: Bitboard<GenericBB> =
     Bitboard(GenericBB(File::F.bitboard() | File::G.bitboard()));
-pub const CASTLE_FILES_LONG_FREE: bitboard::Bitboard<GenericBB> = Bitboard(GenericBB(
+pub const CASTLE_FILES_LONG_FREE: Bitboard<GenericBB> = Bitboard(GenericBB(
     File::B.bitboard() | File::C.bitboard() | File::D.bitboard(),
 ));

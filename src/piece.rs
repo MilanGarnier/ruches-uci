@@ -1,10 +1,12 @@
+use enum_iterator::Sequence;
+
 use super::bitboard::{Bitboard, File, Rank};
 use super::{
     Player,
     bitboard::{GenericBB, SpecialBB, ToBB},
 };
 
-#[derive(Clone, Copy, PartialEq, Debug)]
+#[derive(Clone, Copy, PartialEq, Debug, Sequence)]
 pub enum Piece {
     // neutral piece type
     Pawn,
@@ -17,7 +19,6 @@ pub enum Piece {
 impl Piece {
     pub const COUNT: usize = 6;
 }
-
 impl Piece {
     pub fn from_usize(value: usize) -> Option<Self> {
         match value {

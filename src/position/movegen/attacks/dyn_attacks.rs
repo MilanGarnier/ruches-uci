@@ -1,6 +1,4 @@
-use crate::position::Bitboard;
-use crate::position::Player;
-use crate::position::bitboard::{GenericBB, SpecialBB, Square, ToBB};
+use crate::prelude::*;
 
 // TODO: could replace with an map
 pub fn generate_king(king: Bitboard<Square>) -> Bitboard<GenericBB> {
