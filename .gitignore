@@ -5,3 +5,4 @@
 *.svg
 *.data
 *.old
+*.perft_out
