@@ -1,6 +1,6 @@
 use std::{
     fmt::Display,
-    io::{Write, stdin, stdout},
+    io::{Stdout, Write, stdin, stdout},
     marker::PhantomData,
     ops::{Deref, DerefMut},
     sync::{Arc, Mutex},
@@ -107,6 +107,16 @@ pub fn parse(line: String) -> Result<ParsedCommand, ()> {
 
             _ => Err(()), // return self.failed_parsing_behavior("unsupported command."),
         },
+    }
+}
+
+impl UciOutputStream for UciOut<std::io::Sink> {
+    fn send_response<T: Display>(r: T) -> Result<(), std::io::Error> {
+        Ok(())
+    }
+
+    fn send_debug<T: Display>(_r: T) -> Result<(), std::io::Error> {
+        Ok(())
     }
 }
 
@@ -310,7 +320,10 @@ impl UciShell {
             }
 
             ParsedCommand::PrintBoard => {
-                //self.position.lock().unwrap().pretty_print(&h);
+                self.position
+                    .lock()
+                    .unwrap()
+                    .pretty_print::<UciOut<Stdout>>();
             }
 
             ParsedCommand::Position(p, m) => {
@@ -328,7 +341,7 @@ impl UciShell {
                                 Ok(None) => {
                                     panic!("did not manage to play move");
                                 }
-                                Ok(Some(m)) => pos.stack(&m),
+                                Ok(Some(m)) => todo!(), //pos.stack_simpl(&m),
                             }
                         }
                     }
@@ -344,7 +357,6 @@ impl UciShell {
                     Out::send_response(UciResponse::Raw(
                         format!("Nodes searched: {}", c).as_str(),
                     ))?;
-                    Out::send_response(UciResponse::Raw(""))?;
                 }
                 GoCommand::Infinite => {
                     let (sendstop, sigstop) = channel();

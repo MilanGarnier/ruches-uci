@@ -1,3 +1,10 @@
+//! Castle handling implementation for the chess engine
+//!
+//! This module contains structures and logic for handling castle moves:
+//! - Castle rights per player
+//! - Castle direction (short/long)
+//! - Castle move validation
+//! - Utility functions for castle board positions
 use std::ops::Index;
 
 use crate::prelude::*;
@@ -40,33 +47,9 @@ pub struct CastleRights {
     pub x: [bool; Castle::COUNT],
 }
 
-trait Revertible<Commit>: Sized + Copy + PartialEq {
-    // with stack() then unstack() the object has to remain unchanged
-    fn stack(&mut self, c: &Commit);
-
-    /*
-    fn unstack(&mut self, c: &Commit) {
-        self.stack(c);
-    }*/
-    /*
-    // use this function only for debug purposes
-    fn assert_safety(&mut self, c : &Commit) {
-        let mut s1 = *self;
-        s1.stack(c);
-        s1.unstack(c);
-    }*/
-}
 impl PartialEq for CastleRights {
     fn eq(&self, other: &Self) -> bool {
         self.x == other.x
-    }
-}
-
-impl Revertible<CastleRights> for CastleRights {
-    fn stack(&mut self, c: &CastleRights) {
-        for (index, value) in c.x.iter().enumerate() {
-            self.x[index] ^= value;
-        }
     }
 }
 

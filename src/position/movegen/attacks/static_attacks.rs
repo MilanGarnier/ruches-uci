@@ -19,6 +19,11 @@ pub struct Lookup {
 pub static STATIC_ATTACKS: LazyLock<Lookup> = LazyLock::new(|| Lookup::init());
 
 impl Lookup {
+    pub fn ensure_init(&self) {
+        ()
+    }
+}
+impl Lookup {
     pub fn init() -> Self {
         let mut baseline = unsafe {
             let mut at_rook: Box<AttackTable<TS_ROOK>> = Box::new_uninit().assume_init();

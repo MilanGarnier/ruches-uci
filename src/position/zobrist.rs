@@ -1,8 +1,13 @@
+//! Zobrist hashing implementation for chess positions
+//!
+//! Implements position hashing via the Hashable trait:
+//! - Hash calculation based on piece placement and position state
+//! - Safety feature combines move count, castling rights, and en-passant for
+//!   detecting position changes
+//! Hash updates are performed in types.rs as pieces/game state changes
 use crate::position::Piece;
 use crate::prelude::*;
-/** Zobrist hashing : Zobrist hashing algorithm for Position, AugmentedPos.
- * This implements the Hashable trait. The safety feature is the moveCount+castleRights (basic) for now
- */
+
 use crate::tt::Hashable;
 
 impl Hashable<usize> for Position {

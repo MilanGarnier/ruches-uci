@@ -1,3 +1,13 @@
+//! Traditional material balance evaluation function
+//!
+//! Simply counts the number of pieces each side has and assigns them standard weights:
+//! - Pawn = 100
+//! - Knight = 300
+//! - Bishop = 300
+//! - Rook = 500
+//! - Queen = 900
+//!
+//! Difference between white and black material is returned as the evaluation score.use super::Eval;
 use super::Eval;
 use super::Player;
 use crate::prelude::*;

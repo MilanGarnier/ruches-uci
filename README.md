@@ -1,21 +1,14 @@
-# Ruches-Chess
+[![Rust](https://github.com/MilanGarnier/ruches-chess/actions/workflows/rust.yml/badge.svg?branch=main)](https://github.com/MilanGarnier/ruches-chess/actions/workflows/rust.yml)
 
-Ruches-Chess is a Rust Chess engine project. The goal is to implement a relatively optimized multithreaded chess engine.
+A chess engine written in Rust focused on performance and correctness. The engine implements:
 
-## Features
-
-- Ongoing UCI Interface
-    - Set a custom position - OK
-    - Perft - OK
-    - Analyze with different budgets (time|nodes|depth) - TODO
-
-- Legal move generation - OK
-
-- Transposition tables - Ongoing
-
-- Alpha-beta search - TODO
-
-- MiniMax - OK
+- Bitboard representation with efficient ops
+- Fully legal move generation
+- Perft move counting test suite
+- Basic UCI interface
+- MiniMax search
+- MaterialBalance evaluation
+- Transposition tables
 
 ## Get started
 
@@ -86,7 +79,7 @@ e1f1: 3377351
 e1g1: 4119629
 e1c1: 3551583
 
-Nodes searched : 193690690
+193690690
 ```
 
 ### Unit tests (ongoing)

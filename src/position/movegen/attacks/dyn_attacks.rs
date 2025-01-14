@@ -85,7 +85,6 @@ pub fn generate_bishops(
     attacked
 }
 
-#[cfg(test)]
 pub fn generate_queens(
     p: Bitboard<GenericBB>,
     blockers: Bitboard<GenericBB>,

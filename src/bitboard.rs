@@ -1,15 +1,24 @@
+//! A safe interface for manipulating bitboards with different semantics and concepts
+//!
+//! # Core concepts
+//!
+//! - A `Bitboard<T>` represents a 64-bit value with semantics defined by type T
+//! - The `ToBB64` trait allows converting any type to a raw u64 bitboard
+//! - `BitboardSpec` combines core traits needed for bitboard operations
+//! - Different semantic types like `File`, `Rank`, `Square` etc. implement `BitboardSpec`
+//!
+//! # Key traits
+//!
+//! - `ToBB64`: Convert to raw bitboard
+//! - `FromBB64`: Create from raw bitboard with validation
+//! - `BitboardFastOps`: Common bitboard operations like shifts
+//! - `ToBB`: Convert self into a `Bitboard<Self>`
+//!
+
 use std::fmt::{Debug, Display};
 
-/// Bitboard is basically a u64
 #[allow(non_camel_case_types)]
 pub type bb64 = u64;
-
-/// Object to handle bitboards:
-/// Provides methods to iterate, represent, etc.
-/// To implement it for a type, simply implement the ToBB64 trait for the specific type
-///     You will get in exchange all functions within the BitboardUnsafeOps trait (as well as op overloading)
-/// To provide BitboardOpsKeepProperty, implement the FromBB64 trait
-/// TODO: replace the bb64 type by implementing const add, shift etc.
 
 trait Sealed {}
 
@@ -283,7 +292,7 @@ impl<T: BitboardSpec> std::ops::Shl<usize> for Bitboard<T> {
     fn shl(self, rhs: usize) -> Self::Output {
         let mut o = self.declass();
         for _i in 0..rhs {
-            o = self.lsl();
+            o = o.lsl();
         }
         o
     }
@@ -327,7 +336,7 @@ impl<T: BitboardSpec> std::ops::Shr<usize> for Bitboard<T> {
     fn shr(self, rhs: usize) -> Self::Output {
         let mut o = self.declass();
         for _i in 0..rhs {
-            o = self.lsr();
+            o = o.lsr();
         }
         o
     }
@@ -339,7 +348,7 @@ impl<T: BitboardSpec> std::ops::Add<usize> for Bitboard<T> {
     fn add(self, rhs: usize) -> Self::Output {
         let mut o = self.declass();
         for _i in 0..rhs {
-            o = self.lsu();
+            o = o.lsu();
         }
         o
     }
@@ -351,7 +360,7 @@ impl<T: BitboardSpec> std::ops::Sub<usize> for Bitboard<T> {
     fn sub(self, rhs: usize) -> Self::Output {
         let mut o = self.declass();
         for _i in 0..rhs {
-            o = self.lsd();
+            o = o.lsd();
         }
         o
     }
@@ -362,7 +371,7 @@ impl<T: Display + BitboardSpec> Display for Bitboard<T> {
         write!(f, "{}", self.0)
     }
 }
-impl Debug for Bitboard<GenericBB> {
+impl std::fmt::Debug for Bitboard<GenericBB> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "Bb<Generic>({} ~ {})", self.0.0, self)
     }
@@ -734,4 +743,48 @@ fn btype_tests() {
     assert_eq!(size_of::<Bitboard<SpecialBB>>(), size_of::<u64>());
 
     assert_eq!(Bitboard(File::A) & Bitboard(Rank::R3), Bitboard(Square::a3));
+}
+
+#[cfg(test)]
+mod benchmarks {
+    use super::*;
+    extern crate test;
+    use std::hint::black_box;
+    use test::Bencher;
+
+    #[bench]
+    fn bench_bitboard_operations(b: &mut Bencher) {
+        let square = Square::e4;
+        let bb = Bitboard(square);
+        b.iter(|| {
+            black_box(bb.lsu());
+            black_box(bb.lsd());
+            black_box(bb.lsl());
+            black_box(bb.lsr());
+        });
+    }
+
+    #[bench]
+    fn bench_bitboard_binary_ops(b: &mut Bencher) {
+        let square1 = Square::e4;
+        let square2 = Square::f5;
+        let bb1 = Bitboard(square1);
+        let bb2 = Bitboard(square2);
+        b.iter(|| {
+            black_box(bb1 | bb2);
+            black_box(Square::from_bb(&(bb1.declass() & bb2)));
+        });
+    }
+
+    #[bench]
+    fn bench_rank_file_intersection(b: &mut Bencher) {
+        let rank = Rank::R4;
+        let file = File::E;
+        let bb_rank = Bitboard(rank);
+        let bb_file = Bitboard(file);
+        b.iter(|| {
+            black_box(Square::from_bb(&(bb_rank & Bitboard(file))));
+            black_box(Square::from_bb(&(bb_file & Bitboard(rank))));
+        });
+    }
 }

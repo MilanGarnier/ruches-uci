@@ -1,4 +1,9 @@
 fn main() {
-    // TODO: Add NNUE loading
-    // TODO: Add magic bitboard computing if static move search
+    let profile = std::env::var("PROFILE").unwrap();
+    println!("cargo:rustc-env=LOG_LEVEL={}", match profile.as_str() {
+        "release" => "ERROR",
+        "dev" => "DEBUG",
+        "fixme" => "TRACE",
+        _ => "INFO",
+    });
 }

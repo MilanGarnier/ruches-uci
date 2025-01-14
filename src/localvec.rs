@@ -1,3 +1,23 @@
+//! FastVec is a dynamic-size vector implementation that uses a stack buffer for small sizes
+//! and falls back to heap allocation when needed.
+//!
+//! # Features
+//! - Fixed-size stack buffer of size N for fast access to small amounts of data
+//! - Automatic fallback to heap allocation when stack buffer is full
+//! - Implements Iterator, Debug, and Index traits
+//! - Copy-only type requirements for entries
+//!
+//! # Examples
+//! ```
+//! let mut vec = FastVec::<8, u32>::new();
+//! vec.push(1);
+//! vec.push(2);
+//! assert_eq!(vec[0], 1);
+//! assert_eq!(vec.len(), 2);
+//! ```
+//!
+//! Note: This implementation is marked as deprecated.
+
 use std::{fmt::Debug, mem::MaybeUninit, ops::Index};
 
 // Pre move generation

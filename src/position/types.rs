@@ -88,6 +88,8 @@ mod pieceset {
 
     use std::{marker::PhantomData, ops::Index};
 
+    use log::warn;
+
     use crate::{
         position::zobrist::{ZOBRIST_SEED, zobrist_hash_square},
         prelude::*,
@@ -147,6 +149,13 @@ mod pieceset {
         }
 
         fn attacks(&self, blockers: Bitboard<GenericBB>) -> Bitboard<GenericBB> {
+            let king = match Square::from_bb(&self[Piece::King]) {
+                Some(x) => movegen::attacks::generate_king(x),
+                None => {
+                    warn!("King data unvalid (shoud be square) {}", self[Piece::King]);
+                    SpecialBB::Empty.declass()
+                }
+            };
             movegen::attacks::generate_pawns(self[Piece::Pawn], T::side())
                 | movegen::attacks::generate_knights(self[Piece::Knight])
                 | movegen::attacks::generate_bishops(
@@ -154,21 +163,32 @@ mod pieceset {
                     blockers,
                 )
                 | movegen::attacks::generate_rooks(self[Piece::Rook] | self[Piece::Queen], blockers)
-                | movegen::attacks::generate_king(Square::from_bb(&self[Piece::King]).unwrap())
+                | king
         }
 
         fn add_new_piece(&mut self, index: Piece, sq: Bitboard<Square>) {
+            log::trace!("Add piece {index:?} to {sq}");
             if cfg!(debug_assertions) && self.occupied() & sq != SpecialBB::Empty.declass() {
-                log::warn!("Tried adding piece where it is not authorized");
+                log::warn!(
+                    "Already occupied : found {:?}. cancelled",
+                    self.get_square(sq)
+                );
+                return;
             }
             self.edit(index, sq);
         }
 
         fn remove_piece(&mut self, index: Piece, sq: Bitboard<Square>) {
-            if cfg!(debug_assertions) && self.occupied() & sq == SpecialBB::Empty.declass() {
-                log::warn!("Tried removing piece where it is not authorized {index:?} - {sq}");
-            };
+            log::trace!("Remove piece {index:?} from {sq}");
             self.edit(index, sq);
+            if cfg!(debug_assertions) && self.occupied() & sq != SpecialBB::Empty.declass() {
+                self.edit(index, sq);
+                log::warn!(
+                    "Tried removing piece that does not exist. {index:?} - {sq}. ({})",
+                    self[index]
+                );
+                log::warn!("Action cancelled");
+            };
         }
 
         fn move_piece(&mut self, index: Piece, src: Bitboard<Square>, dest: Bitboard<Square>) {
@@ -380,10 +400,109 @@ impl<'a> PlayerStorageSpec<'a> for PlayerStorage {
         src: Bitboard<Square>,
         dest: Bitboard<Square>,
     ) {
-        log::warn!("Called unstable function in move generation.");
+        log::info!("Apply move {index:?} - {src} - {dest}.");
         match pl {
             Player::Black => self.black.move_piece(index, src, dest),
             Player::White => self.white.move_piece(index, src, dest),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_empty_position() {
+        let storage = PlayerStorage::empty();
+        assert_eq!(storage.white().occupied(), SpecialBB::Empty.declass());
+        assert_eq!(storage.black().occupied(), SpecialBB::Empty.declass());
+        assert_eq!(storage.get(Square::e1.bb()), None);
+    }
+
+    #[test]
+    fn test_startingpos() {
+        let storage = PlayerStorage::startingpos();
+
+        // Test white pieces
+        assert!(
+            storage[(Player::White, Piece::Pawn)] & Rank::R2.declass()
+                != SpecialBB::Empty.declass()
+        );
+        assert!(
+            storage[(Player::White, Piece::King)] & Rank::R1.declass()
+                != SpecialBB::Empty.declass()
+        );
+        assert!(
+            storage[(Player::White, Piece::Queen)] & Rank::R1.declass()
+                != SpecialBB::Empty.declass()
+        );
+
+        // Test black pieces
+        assert!(
+            storage[(Player::Black, Piece::Pawn)] & Rank::R7.declass()
+                != SpecialBB::Empty.declass()
+        );
+        assert!(
+            storage[(Player::Black, Piece::King)] & Rank::R8.declass()
+                != SpecialBB::Empty.declass()
+        );
+        assert!(
+            storage[(Player::Black, Piece::Queen)] & Rank::R8.declass()
+                != SpecialBB::Empty.declass()
+        );
+    }
+
+    #[test]
+    fn test_add_remove_pieces() {
+        let mut storage = PlayerStorage::empty();
+        let sq = Square::e4.bb();
+
+        storage.add_new_piece(Player::White, Piece::Queen, sq);
+        assert_eq!(storage.get(sq), Some(Piece::Queen));
+
+        storage.remove_piece(Player::White, Piece::Queen, sq);
+        assert_eq!(storage.get(sq), None);
+    }
+
+    #[test]
+    fn test_move_piece() {
+        let mut storage = PlayerStorage::empty();
+        let src = Square::e2.bb();
+        let dest = Square::e4.bb();
+
+        storage.add_new_piece(Player::White, Piece::Pawn, src);
+        storage.move_piece(Player::White, Piece::Pawn, src, dest);
+
+        assert_eq!(storage.get(src), None);
+        assert_eq!(storage.get(dest), Some(Piece::Pawn));
+    }
+
+    #[test]
+    fn test_attacks_lowercase() {
+        let mut storage = PlayerStorage::empty();
+
+        storage.add_new_piece(Player::White, Piece::Queen, Bitboard(Square::d4));
+        storage.add_new_piece(Player::Black, Piece::Pawn, Bitboard(Square::e5));
+
+        let white_attacks = storage.generate_attacks(Player::White);
+        assert!(white_attacks & Square::e5.declass() != SpecialBB::Empty.declass());
+    }
+
+    #[test]
+    fn test_zobrist() {
+        let storage1 = PlayerStorage::startingpos();
+        let storage2 = PlayerStorage::startingpos();
+        let mut storage3 = PlayerStorage::startingpos();
+
+        assert_eq!(storage1.zobrist(), storage2.zobrist());
+
+        storage3.move_piece(
+            Player::White,
+            Piece::Pawn,
+            Bitboard(Square::e2),
+            Bitboard(Square::e4),
+        );
+        assert_ne!(storage1.zobrist(), storage3.zobrist());
     }
 }

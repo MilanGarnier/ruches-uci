@@ -1,7 +1,19 @@
+//! Evaluation module handles types & traits for evaluating game positions.
+//!
+//! This includes:
+//! - `Eval` enum for representing evaluation results (mate or approximate score)
+//! - `ApproxEval` for centipawn-based evaluations with search depth
+//! - `ForcedMate` for forced mate sequences
+//! - `EvalState` for maintaining evaluation and principal variation
+//! - `MaterialBalance` trait for piece counting evaluations
+//!
+//! The evaluation system supports both mate-in-N and centipawn scores,
+//! with proper comparison and nesting logic for search algorithms.
 mod s_count_material;
 
 use std::fmt::{Display, Formatter};
 
+use movegen::SimplifiedMove;
 pub use s_count_material::MaterialBalance;
 
 use super::prelude::*;
@@ -39,7 +51,7 @@ pub struct EvalState {
 
 //// Internal defs/implementations
 
-struct MoveList(Vec<Move>);
+struct MoveList(Vec<SimplifiedMove>);
 impl Default for MoveList {
     fn default() -> Self {
         MoveList { 0: Vec::new() }
@@ -48,34 +60,25 @@ impl Default for MoveList {
 impl Display for MoveList {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         for m in &self.0 {
-            write!(f, "{m} ")?;
+            write!(f, "{m:?} ")?;
         }
         Ok(())
     }
 }
 
 impl ForcedMate {
-    fn pick_best_for<'a>(p: Player, e0: &'a Self, e1: &'a Self) -> usize {
+    fn pick_best_for<'a>(p: Player, e0: &'a Self, e1: &'a Self) -> bool {
         if e0.p == e1.p {
             if p == e0.p {
                 // mate for player, pick faster
-                match e0.hmove_count < e1.hmove_count {
-                    true => 0,
-                    false => 1,
-                }
+                e0.hmove_count >= e1.hmove_count
             } else {
                 // mate against player, pick longer
-                match e0.hmove_count < e1.hmove_count {
-                    false => 0,
-                    true => 1,
-                }
+                e0.hmove_count < e1.hmove_count
             }
         } else {
             // pick mate for player
-            match e0.p == p {
-                true => 0,
-                false => 1,
-            }
+            e0.p != p
         }
     }
     fn nest(&self) -> Self {
@@ -95,18 +98,12 @@ impl Display for ForcedMate {
 }
 
 impl ApproxEval {
-    fn pick_best_for<'a>(p: Player, e0: &'a Self, e1: &'a Self) -> usize {
+    fn pick_best_for<'a>(p: Player, e0: &'a Self, e1: &'a Self) -> bool {
         if e0.cp == e1.cp {
             // pick higher depth if equivalent
-            match e0.depth < e1.depth {
-                true => 1,
-                false => 0,
-            }
+            e0.depth < e1.depth
         } else {
-            match (e0.cp < e1.cp) ^ (p == Player::White) {
-                true => 0,
-                false => 1,
-            }
+            !((e0.cp < e1.cp) ^ (p == Player::White))
         }
     }
     fn nest(&self) -> Self {
@@ -135,18 +132,19 @@ impl Eval {
     pub fn draw() -> Self {
         Eval::Approx(ApproxEval { cp: 0, depth: 0 })
     }
-    fn pick_best_for(p: Player, e0: &Self, e1: &Self) -> usize {
+    // DEPRECATED: will be a reduction function instead
+    fn pick_best_for(p: Player, e0: Self, e1: Self) -> bool {
         match (e0, e1) {
             (Self::Mate(x), Self::Mate(y)) => ForcedMate::pick_best_for(p, &x, &y),
             (Self::Approx(x), Self::Approx(y)) => ApproxEval::pick_best_for(p, &x, &y),
             (Self::Mate(x), Self::Approx(_)) => {
                 if x.p == p {
-                    0
+                    false
                 } else {
-                    1
+                    true
                 }
             }
-            _ => 1 - Eval::pick_best_for(p, e1, e0),
+            _ => !Eval::pick_best_for(p, e1, e0),
         }
     }
     fn nest(self) -> Self {
@@ -166,12 +164,15 @@ impl Display for Eval {
 }
 
 impl EvalState {
-    pub fn pick_best_for(p: Player, e0: &Self, e1: &Self) -> usize {
-        Eval::pick_best_for(p, &e0.eval, &e1.eval)
+    pub fn pick_best_for(p: Player, e0: Self, e1: Self) -> Self {
+        match Eval::pick_best_for(p, e0.eval, e1.eval) {
+            true => e1,
+            _ => e0,
+        }
     }
 
     // create the evalState for the current move, knowing that the eval is the best for player
-    pub fn nest(&mut self, m: Move) {
+    pub fn nest(&mut self, m: SimplifiedMove) {
         self.eval = self.eval.nest();
         self.pv.0.push(m);
     }

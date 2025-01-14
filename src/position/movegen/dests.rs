@@ -1,3 +1,5 @@
+use log::debug;
+
 use crate::prelude::*;
 
 use super::AugmentedPos;
@@ -11,7 +13,15 @@ pub fn generate_king_dests(src: Bitboard<Square>, meta: &AugmentedPos) -> Bitboa
     // squares that arent attacked by opponent, and not occupied by my own pieces
     let free_sq_for_king = !meta.attacked[player.other() as usize] & !meta.p.pos.occupied(player);
 
-    attacks::generate_king(king) & free_sq_for_king
+    let r = attacks::generate_king(king) & free_sq_for_king;
+    debug!(
+        "King dests for this turn {} -> {} \n (details) -- {} & {} ",
+        src,
+        r,
+        attacks::generate_king(king),
+        free_sq_for_king
+    );
+    r
 }
 
 // mask to know when to trigger en passant => check [(src | dest) & mask == (src | dest)]
