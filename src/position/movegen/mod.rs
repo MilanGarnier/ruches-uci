@@ -602,6 +602,8 @@ impl<'a> AugmentedPos<'a> {
             })
             .filter_map(|x| x)
             .reduce(&reduce);
+        //TODO: add castling
+        a
     }
 
     fn compute_pinned(&mut self) {
