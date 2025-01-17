@@ -78,9 +78,8 @@ impl Position {
         task: impl Fn(&Self, &SimplifiedMove) -> R,
         reduce: impl Fn(R, R) -> R,
     ) -> Option<R> {
-        log::info!("listing outcomes for {}-{}", ch.src, ch.dest);
+        log::trace!("listing outcomes for {}-{}", ch.src, ch.dest);
         let turn = self.turn();
-        let dest_piece = self.pos.get((self.turn(), ch.dest.into()));
 
         // en passant case
         let en_passant = (ch.piece == Piece::Pawn) && (ch.dest.declass() == self.en_passant);
@@ -90,7 +89,7 @@ impl Position {
             && (ch.dest.declass() & (self.turn().other().backrank())) != SpecialBB::Empty.declass();
 
         // can be improved
-        let en_passant_change = {
+        let en_passant_change = self.en_passant | {
             if (ch.dest - 2) == ch.src.declass() {
                 ch.dest - 1 // TODO: OP directly on u8
             } else if (ch.dest + 2) == ch.src.declass() {
@@ -106,8 +105,8 @@ impl Position {
             }
             // toggle ennemy pawn
             let en_passant_target_square = match turn.other() {
-                Player::Black => (ch.dest.declass() & self.en_passant) + 1,
-                Player::White => (ch.dest.declass() & self.en_passant) - 1,
+                Player::Black => (ch.dest.declass() & self.en_passant) - 1,
+                Player::White => (ch.dest.declass() & self.en_passant) + 1,
             }
             .into_iter()
             .next()
@@ -188,229 +187,13 @@ impl Position {
         res
     }
 
-    #[deprecated]
-    fn stack_change_rev(&mut self, ch: &Change, pl: Player) {
-        // en passant case
-        if ch.piece() == Piece::Pawn
-            && ch.cap() == Some(Piece::Pawn)
-            && ch.bitboard() & self.en_passant != Bitboard(SpecialBB::Empty).declass()
-        {
-            // toggle ennemy pawn
-            self.pos.remove_piece(
-                pl.other(),
-                Piece::Pawn,
-                match pl.other() {
-                    Player::Black => (ch.bitboard() & self.en_passant) - 1,
-                    Player::White => (ch.bitboard() & self.en_passant) + 1,
-                }
-                .into_iter()
-                .next()
-                .unwrap(),
-            );
-        } else {
-            match ch.cap() {
-                Some(cap) => {
-                    self.pos.remove_piece(pl.other(), cap, ch.dest());
-                }
-                None => (),
-            }
-        }
-        self.pos.move_piece(pl, ch.piece(), ch.from(), ch.dest());
-    }
-
-    #[deprecated]
-    fn unstack_change_rev(&mut self, ch: &Change, pl: Player) {
-        self.pos.move_piece(pl, ch.piece(), ch.dest(), ch.from());
-        // en passant case
-        if ch.piece() == Piece::Pawn
-            && ch.cap() == Some(Piece::Pawn)
-            && ch.bitboard() & self.en_passant != Bitboard(SpecialBB::Empty).declass()
-        {
-            // toggle ennemy pawn back
-            self.pos.add_new_piece(
-                pl.other(),
-                Piece::Pawn,
-                match pl.other() {
-                    Player::Black => (ch.bitboard() & self.en_passant) - 1,
-                    Player::White => (ch.bitboard() & self.en_passant) + 1,
-                }
-                .into_iter()
-                .next()
-                .unwrap(),
-            );
-        } else {
-            match ch.cap() {
-                Some(cap) => {
-                    self.pos.add_new_piece(pl.other(), cap, ch.dest());
-                }
-                None => (),
-            }
-        }
-    }
-
-    fn stack_prom_rev(&mut self, pr: &Promotion) {
-        let turn = self.turn();
-
-        self.pos.remove_piece(turn, Piece::Pawn, pr.from());
-        self.pos.add_new_piece(turn, pr.new_piece(), pr.dest());
-        match pr.cap() {
-            Some(cap) => {
-                self.pos.remove_piece(turn.other(), cap, pr.dest());
-            }
-            None => (),
-        }
-    }
-    fn unstack_prom_rev(&mut self, pr: &Promotion) {
-        let turn = self.turn();
-
-        self.pos.remove_piece(turn, pr.new_piece(), pr.dest());
-        self.pos.add_new_piece(turn, Piece::Pawn, pr.from());
-        match pr.cap() {
-            Some(cap) => {
-                self.pos.add_new_piece(turn.other(), cap, pr.dest());
-            }
-            None => (),
-        }
-    }
-
-    fn stack_atomic_rev(&mut self, amv: &AtomicMove) {
-        match amv {
-            AtomicMove::PieceMoved(ch) => self.stack_change_rev(ch, self.turn()),
-            AtomicMove::PiecePromoted(pr) => self.stack_prom_rev(pr),
-        }
-    }
-
-    fn unstack_atomic_rev(&mut self, amv: &AtomicMove) {
-        match amv {
-            AtomicMove::PieceMoved(ch) => {
-                self.unstack_change_rev(ch, self.turn());
-            }
-            AtomicMove::PiecePromoted(pr) => self.unstack_prom_rev(pr),
-        }
-    }
-
-    fn stack_std_rev(&mut self, smv: &StandardMove) {
-        self.castles.stack_rev(&smv.cas);
-        self.stack_atomic_rev(&smv.mv);
-    }
-
-    fn unstack_std_rev(&mut self, smv: &StandardMove) {
-        self.castles.stack_rev(&smv.cas);
-        self.unstack_atomic_rev(&smv.mv);
-    }
-    fn stack_castle_rev(&mut self, cs: &Castle) {
-        let turn = self.turn();
-
-        let king_src = (turn.backrank().declass() & File::E.declass())
-            .into_iter()
-            .next()
-            .expect("No king destination speicified for piece");
-        let king_dest = (turn.backrank().declass()
-            & match cs {
-                Castle::Short => File::G,
-                Castle::Long => File::C,
-            }
-            .declass())
-        .into_iter()
-        .next()
-        .expect("No king destination speicified for piece");
-
-        let rook_src = (turn.backrank().declass()
-            & match cs {
-                Castle::Short => File::H,
-                Castle::Long => File::A,
-            }
-            .declass())
-        .into_iter()
-        .next()
-        .unwrap();
-        let rook_dest = (turn.backrank().declass()
-            & match cs {
-                Castle::Short => File::F,
-                Castle::Long => File::D,
-            }
-            .declass())
-        .into_iter()
-        .next()
-        .unwrap();
-
-        self.pos.move_piece(turn, Piece::Rook, rook_src, rook_dest);
-        self.pos.move_piece(turn, Piece::Rook, king_src, king_dest);
-    }
-
-    fn un_stack_castle_rev(&mut self, cs: &Castle) {
-        let turn = self.turn();
-
-        let king_src = (turn.backrank().declass() & File::E.declass())
-            .into_iter()
-            .next()
-            .expect("No king destination speicified for piece");
-        let king_dest = (turn.backrank().declass()
-            & match cs {
-                Castle::Short => File::G,
-                Castle::Long => File::C,
-            }
-            .declass())
-        .into_iter()
-        .next()
-        .expect("No king destination speicified for piece");
-
-        let rook_src = (turn.backrank().declass()
-            & match cs {
-                Castle::Short => File::H,
-                Castle::Long => File::A,
-            }
-            .declass())
-        .into_iter()
-        .next()
-        .unwrap();
-        let rook_dest = (turn.backrank().declass()
-            & match cs {
-                Castle::Short => File::F,
-                Castle::Long => File::D,
-            }
-            .declass())
-        .into_iter()
-        .next()
-        .unwrap();
-
-        self.pos.move_piece(turn, Piece::Rook, rook_dest, rook_src);
-        self.pos.move_piece(turn, Piece::Rook, king_dest, king_src);
-    }
-
-    fn stack_partial_rev(&mut self, pmv: &PartialMove) {
-        match pmv {
-            PartialMove::Std(smv) => self.stack_std_rev(smv),
-            PartialMove::Castle(cs, _, cda) => {
-                self.stack_castle_rev(cs);
-                self.castles.stack_rev(cda);
-            }
-        }
-    }
-    fn un_stack_partial_rev(&mut self, pmv: &PartialMove) {
-        match pmv {
-            PartialMove::Std(smv) => self.unstack_std_rev(smv),
-            PartialMove::Castle(cs, _, cda) => {
-                self.un_stack_castle_rev(cs);
-                self.castles.stack_rev(cda);
-            }
-        }
-    }
-
-    pub fn stack(&mut self, mv: &Move) {
-        self.stack_partial_rev(&mv.partialmove());
-        self.fifty_mv ^= mv.fifty_mv();
-        self.en_passant ^= mv.en_passant();
-        self.half_move_count += 1;
-    }
-
     // very unoptimized, should not be called when we can access the move as &mv
     pub fn getmove(&mut self, uci: &str) -> Result<Option<SimplifiedMove>, ()> {
         let gather_value = |x: Option<SimplifiedMove>, y| x.or(y);
 
         let a = AugmentedPos::map_issues(
             self,
-            |_p, m: &SimplifiedMove| match format!("{m:?}") == uci {
+            |_p, m: &SimplifiedMove| match format!("{m}") == uci {
                 true => Some(*m),
                 false => None,
             },
@@ -429,6 +212,31 @@ impl Position {
             None => None,
         })
     }
+    pub fn playmove(&mut self, uci: &str) -> Result<Option<Position>, ()> {
+        let gather_value = |x: Option<Position>, y| x.or(y);
+
+        let a = AugmentedPos::map_issues(
+            self,
+            |p, m: &SimplifiedMove| match format!("{m}") == uci {
+                true => Some(*p),
+                false => None,
+            },
+            gather_value,
+        );
+        // Here, receiving Option<Option<>> would mean that
+        // AugmentedPos::map_issues can fail at two different levels:
+        // - outer Option: failed position exploration (filtered out by rules)
+        // - inner Option: match with query failed
+        // AugmentedPos now can collapse both Options as:
+        // - Some(None) would mean all legal positions explored but none matching uci
+        // - Some(Some()) would mean all legal positions explored with one matching uci
+        // - None would mean no legal positions explored (invalid state)
+        Ok(match a {
+            Some(x) => x,
+            None => None,
+        })
+    }
+
     #[cfg(feature = "perft")]
     pub fn perft_top<O: UciOutputStream>(&mut self, depth: usize) -> usize {
         use crate::uci::UciResponse;
@@ -461,7 +269,7 @@ impl Position {
         match depth {
             0 => 1,
             1 => {
-                let a = AugmentedPos::map_issues(self, |p, _| 1 as usize, |a, b| a + b);
+                let a = AugmentedPos::map_issues(self, |_, _| 1 as usize, |a, b| a + b);
                 match a {
                     Some(x) => x,
                     None => 0,
@@ -823,7 +631,7 @@ fn random_opening() {
 fn perft_startpos_extensive() {
     perft_test_batch(
         "Startpos",
-        &[1, 20, 400, 8902, 127281],
+        &[1, 20, 400, 8902, 197281],
         "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR",
         "w",
         "KQkq",
@@ -832,7 +640,7 @@ fn perft_startpos_extensive() {
         "1",
     );
 }
-
+#[cfg(test)]
 fn perft_test_batch(
     name: &str,
     depths: &[usize],
@@ -848,6 +656,7 @@ fn perft_test_batch(
     }
 }
 
+#[cfg(test)]
 fn perft_test(
     name: &str,
     depth: usize,

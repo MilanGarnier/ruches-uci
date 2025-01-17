@@ -4,7 +4,8 @@ use std::fmt::{Debug, Display};
 use crate::localvec::FastVec;
 pub type MoveVec = FastVec<64, Move>;
 use crate::piece::Piece;
-use dests::{generate_king_dests, generate_next_en_passant_data, pawn_move_up_nocap};
+use dests::{generate_king_dests, pawn_move_up_nocap};
+use log::warn;
 
 use super::Player;
 use super::castle::{self, CASTLES_KEEP_UNCHANGED, Castle, CastleData};
@@ -28,6 +29,23 @@ pub struct SimplifiedMove {
     pub dest: Bitboard<PackedSquare>,
     pub piece: Piece,
     pub hint_legal: bool,
+}
+impl Display for SimplifiedMove {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.piece == Piece::Pawn
+            && self.dest.declass() & (Rank::R1.bb() | Rank::R8) != SpecialBB::Empty.declass()
+        {
+            warn!(
+                "Promotions are not supported yet ({} -> {}), defaulting to queen.",
+                self.src, self.dest
+            );
+            let c: char = ['P', 'N', 'B', 'R', 'Q', 'K'][Piece::Queen as usize];
+            write!(f, "{}{}{}", self.src, self.dest, c)?;
+        } else {
+            write!(f, "{}{}", self.src, self.dest)?;
+        }
+        Ok(())
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -559,7 +577,7 @@ impl<'a> AugmentedPos<'a> {
         };
 
         use enum_iterator::all;
-        all::<Piece>()
+        let a = all::<Piece>()
             .map(|p| {
                 self.p.pos[(self.turn, p)]
                     .into_iter()
@@ -583,7 +601,7 @@ impl<'a> AugmentedPos<'a> {
                     .reduce(&reduce)
             })
             .filter_map(|x| x)
-            .reduce(&reduce)
+            .reduce(&reduce);
     }
 
     fn compute_pinned(&mut self) {

@@ -323,8 +323,12 @@ impl<'a> PlayerStorageSpec<'a> for PlayerStorage {
 
     fn generate_attacks(&self, pl: Player) -> Bitboard<GenericBB> {
         match pl {
-            Player::Black => self.black.attacks(self.white.occupied()),
-            Player::White => self.white.attacks(self.black.occupied()),
+            Player::Black => self
+                .black
+                .attacks(self.white.occupied() | self.black.occupied()),
+            Player::White => self
+                .white
+                .attacks(self.white.occupied() | self.black.occupied()),
         }
     }
 

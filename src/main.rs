@@ -5,7 +5,9 @@
 #![feature(impl_trait_in_assoc_type)]
 #![feature(associated_type_defaults)]
 
+use std::cell::LazyCell;
 use std::io::Write;
+use std::time::SystemTime;
 use std::{io::Stdout, sync::LazyLock};
 
 use uci::{UciOut, UciShell};
@@ -24,18 +26,55 @@ pub mod uci;
 static INTERFACE: LazyLock<UciShell> = LazyLock::new(|| uci::UciShell::new());
 
 extern crate enum_iterator;
+
+static START_TIME: LazyLock<SystemTime> = LazyLock::new(|| SystemTime::now());
+
+#[cfg(debug_assertions)]
+fn loglevel() -> log::LevelFilter {
+    let x = std::env::var("LOG");
+    match x {
+        Ok(level) => match level.as_str() {
+            "TRACE" => {
+                println!("TRACE");
+                log::LevelFilter::Trace
+            }
+            "DEBUG" => {
+                println!("DEBUG");
+                log::LevelFilter::Debug
+            }
+            "INFO" => {
+                println!("INFO");
+                log::LevelFilter::Info
+            }
+            "WARN" => {
+                println!("WARN");
+                log::LevelFilter::Warn
+            }
+            "ERROR" => {
+                println!("ERROR");
+                log::LevelFilter::Error
+            }
+            _ => {
+                println!("Info is the default log level.");
+                log::LevelFilter::Info
+            }
+        },
+        Err(_) => log::LevelFilter::Error,
+    }
+}
+
 #[cfg(debug_assertions)]
 fn setup_logger() {
     env_logger::Builder::new()
-        .filter_level(log::LevelFilter::Debug)
+        .filter_level(loglevel())
         .format(|buf, record| {
             writeln!(
                 buf,
-                "{}:{} {} [{}] - {}",
+                "{}:{} {} \t [{}] - {}",
                 record.file().unwrap_or("unknown"),
                 record.line().unwrap_or(0),
                 std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
+                    .duration_since(START_TIME.clone())
                     .unwrap()
                     .as_secs(),
                 record.level(),
@@ -47,27 +86,12 @@ fn setup_logger() {
 
 #[cfg(not(debug_assertions))]
 fn setup_logger() {
-    env_logger::Builder::new()
-        .filter_level(log::LevelFilter::Error)
-        .format(|buf, record| {
-            writeln!(
-                buf,
-                "{}:{} {} [{}] - {}",
-                record.file().unwrap_or("unknown"),
-                record.line().unwrap_or(0),
-                std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap()
-                    .as_secs(),
-                record.level(),
-                record.args()
-            )
-        })
-        .init();
+    ();
 }
 
 #[tokio::main/*(flavor = "current_thread")*/]
 async fn main() {
+    let _ = START_TIME.clone();
     setup_logger();
     log::debug!("Debug logging enabled"); // Test
     let mut args: Vec<_> = std::env::args().collect();

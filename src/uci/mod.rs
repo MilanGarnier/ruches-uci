@@ -334,14 +334,16 @@ impl UciShell {
                 match m {
                     Some(mv) => {
                         for m in mv {
-                            match pos.getmove(&m) {
+                            match pos.playmove(&m) {
                                 Err(()) => {
                                     panic!("position was illegal to begin with");
                                 }
                                 Ok(None) => {
                                     panic!("did not manage to play move");
                                 }
-                                Ok(Some(m)) => todo!(), //pos.stack_simpl(&m),
+                                Ok(Some(p)) => {
+                                    pos.clone_from(&p);
+                                } //pos.stack_simpl(&m),
                             }
                         }
                     }

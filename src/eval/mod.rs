@@ -51,7 +51,7 @@ pub struct EvalState {
 
 //// Internal defs/implementations
 
-struct MoveList(Vec<SimplifiedMove>);
+pub struct MoveList(Vec<SimplifiedMove>);
 impl Default for MoveList {
     fn default() -> Self {
         MoveList { 0: Vec::new() }

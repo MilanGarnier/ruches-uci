@@ -19,8 +19,20 @@ use std::fmt::{Debug, Display};
 
 #[allow(non_camel_case_types)]
 pub type bb64 = u64;
+mod seal {
+    use super::{File, GenericBB, PackedSquare, Rank, SpecialBB, Square};
 
-trait Sealed {}
+    pub trait Sealed {}
+
+    impl Sealed for PackedSquare {}
+
+    impl Sealed for GenericBB {}
+    impl Sealed for SpecialBB {}
+    impl Sealed for Square {}
+    impl Sealed for Rank {}
+    impl Sealed for File {}
+}
+use seal::Sealed;
 
 pub trait BitboardSpec: ToBB64 + Sized + Sealed {}
 impl<T: ToBB64 + Sized + Sealed> BitboardSpec for T {}
@@ -96,7 +108,6 @@ pub struct GenericBB(pub bb64);
 /// enum Rank
 /// enum Square
 /// enum PackedSquare
-impl Sealed for SpecialBB {}
 impl ToBB64 for SpecialBB {
     #[inline(always)]
     fn to_bb64(&self) -> bb64 {
@@ -105,7 +116,6 @@ impl ToBB64 for SpecialBB {
     }
 }
 
-impl Sealed for GenericBB {}
 impl ToBB64 for GenericBB {
     #[inline(always)]
     fn to_bb64(&self) -> bb64 {
@@ -113,7 +123,6 @@ impl ToBB64 for GenericBB {
     }
 }
 
-impl Sealed for Square {}
 impl ToBB64 for Square {
     #[inline(always)]
     fn to_bb64(&self) -> bb64 {
@@ -122,7 +131,6 @@ impl ToBB64 for Square {
     }
 }
 
-impl Sealed for Rank {}
 impl ToBB64 for Rank {
     #[inline(always)]
     fn to_bb64(&self) -> bb64 {
@@ -131,7 +139,6 @@ impl ToBB64 for Rank {
     }
 }
 
-impl Sealed for File {}
 impl ToBB64 for File {
     #[inline(always)]
     fn to_bb64(&self) -> bb64 {
@@ -711,7 +718,6 @@ pub enum PackedSquare {
 impl PackedSquare {
     pub const COUNT: usize = 64;
 }
-impl Sealed for PackedSquare {}
 impl ToBB64 for PackedSquare {
     fn to_bb64(&self) -> bb64 {
         let x = *self as u8;

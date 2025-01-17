@@ -20,9 +20,10 @@ pub use dyn_attacks::{generate_bishops, generate_queens, generate_rooks};
 
 pub use dyn_attacks::{generate_king, generate_knights, generate_pawns};
 mod tests {
+
     use movegen::attacks::{
         dyn_attacks::{generate_bishops, generate_queens, generate_rooks},
-        generate_king, generate_knights, generate_pawns,
+        generate_knights, generate_pawns,
     };
 
     use crate::prelude::*;
@@ -38,7 +39,7 @@ mod tests {
             | Bitboard(Square::d5)
             | Bitboard(Square::e5);
 
-        assert_eq!(generate_king(king), expected);
+        assert_eq!(movegen::attacks::generate_king(king), expected);
     }
 
     #[test]

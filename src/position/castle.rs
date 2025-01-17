@@ -114,9 +114,6 @@ impl CastleData {
     }
 }
 
-pub const CASTLE_ALLOWED_ONE_SIDE: CastleRights = CastleRights { x: [true, true] };
-pub const CASTLE_FORBIDDEN_ONE_SIDE: CastleRights = CastleRights { x: [false, false] };
-
 pub const CASTLES_ALL_ALLOWED: CastleData = CastleData { x: 0xF };
 pub const CASTLES_ALL_FORBIDDEN: CastleData = CastleData { x: 0x0 };
 

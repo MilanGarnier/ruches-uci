@@ -56,7 +56,7 @@ pub fn eval_minimax<T: BasicEvaluation>(pos: &Position, depth: usize) -> EvalSta
                 |e0, e1| EvalState::pick_best_for(pos.turn(), e0, e1),
             );
 
-            let mut e = match e {
+            let e = match e {
                 Some(x) => x,
                 None => {
                     warn!("This could also be a draw, TODO");
