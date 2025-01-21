@@ -81,11 +81,14 @@ impl Position {
         match ch {
             Move::Normal(ch) => {
                 log::trace!("listing outcomes for {}-{}", ch.src, ch.dest);
+                let fmv = self.fifty_mv;
+                self.fifty_mv += 1;
+
                 let turn = self.turn();
 
                 // en passant case
-                let en_passant =
-                    (ch.piece == Piece::Pawn) && (ch.dest.declass() == self.en_passant);
+                let en_passant = (ch.piece == Piece::Pawn)
+                    && (ch.dest.declass() & self.en_passant != SpecialBB::Empty.declass());
 
                 // promotion case
                 let promotion = (ch.piece == Piece::Pawn)
@@ -123,6 +126,7 @@ impl Position {
                 } else {
                     match self.pos.get((turn.other(), ch.dest.into())) {
                         Some(cap) => {
+                            self.fifty_mv = 0;
                             self.pos.remove_piece(turn.other(), cap, ch.dest.into());
                         }
                         None => (),
@@ -149,6 +153,9 @@ impl Position {
                     self.castles.set(turn, Castle::Short, false);
                     self.castles.set(turn, Castle::Long, false);
                 }
+                if ch.piece == Piece::Pawn {
+                    self.fifty_mv = 0;
+                }
 
                 // capturing other player's rook
                 if (ch.dest.declass() & (turn.other().backrank() & File::A.bb()))
@@ -165,7 +172,6 @@ impl Position {
                 //// preparations done, now inspecting
 
                 self.en_passant ^= en_passant_change;
-                self.fifty_mv += 1;
                 self.half_move_count += 1;
 
                 self.pos
@@ -206,8 +212,8 @@ impl Position {
                     .move_piece(turn, ch.piece, ch.dest.into(), ch.src.into());
                 self.castles = cda_old;
                 self.en_passant ^= en_passant_change;
-                self.fifty_mv -= 1; // TODO: fifty mv rule
-                self.half_move_count -= 1;
+                self.half_move_count -= 1; // TODO: fifty mv rule
+                self.fifty_mv = fmv;
 
                 // Clean state
                 if en_passant {
@@ -603,11 +609,14 @@ mod tests {
     fn captures_en_passant() {
         let p = Position::from_fen("7k/8/8/8/1p6/8/P7/7K", "w", "-", "-", "0", "0");
         let p = p.playmove("a2a4").unwrap().unwrap();
-        assert_eq!(p.half_move_count, 1);
-        assert_eq!(p.fifty_mv, 0);
+        assert_eq!(p.half_move_count, 1, "Failed half move count");
+        assert_eq!(p.fifty_mv, 0, "Failed fifty move count when pushing pawn");
         let mut p = p.playmove("b4a3").unwrap().unwrap();
-        assert_eq!(p.half_move_count, 2);
-        assert_eq!(p.fifty_mv, 0);
+        assert_eq!(p.half_move_count, 2, "Failed half move count");
+        assert_eq!(
+            p.fifty_mv, 0,
+            "Failed fifty move count when capturing en passant"
+        );
         assert_eq!(p.perft_top::<NullUciStream>(1), 3);
     }
 
