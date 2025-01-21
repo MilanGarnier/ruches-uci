@@ -48,7 +48,7 @@ pub fn eval_minimax<T: BasicEvaluation>(pos: &Position, depth: usize) -> EvalSta
 
             let e = AugmentedPos::map_issues(
                 pos,
-                |p, _x: &SimplifiedMove| {
+                |p, _x| {
                     let mut a = eval_minimax::<T>(p, depth - 1);
                     a.nest(*_x);
                     a

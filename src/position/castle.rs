@@ -9,7 +9,7 @@ use std::ops::Index;
 
 use crate::prelude::*;
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum Castle {
     Short,
     Long,

@@ -13,7 +13,7 @@ mod castle;
 pub mod movegen;
 mod zobrist;
 use crate::prelude::*;
-use crate::uci::{UciOut, UciOutputStream};
+use crate::uci::UciOutputStream;
 
 pub trait PositionSpec: Sized {
     fn startingpos() -> Self;
@@ -74,126 +74,271 @@ impl PositionSpec for Position {
 impl Position {
     fn simplified_move_outcomes<R>(
         mut self,
-        ch: &SimplifiedMove,
-        task: impl Fn(&Self, &SimplifiedMove) -> R,
+        ch: &Move,
+        task: impl Fn(&Self, &Move) -> R,
         reduce: impl Fn(R, R) -> R,
     ) -> Option<R> {
-        log::trace!("listing outcomes for {}-{}", ch.src, ch.dest);
-        let turn = self.turn();
+        match ch {
+            Move::Normal(ch) => {
+                log::trace!("listing outcomes for {}-{}", ch.src, ch.dest);
+                let turn = self.turn();
 
-        // en passant case
-        let en_passant = (ch.piece == Piece::Pawn) && (ch.dest.declass() == self.en_passant);
+                // en passant case
+                let en_passant =
+                    (ch.piece == Piece::Pawn) && (ch.dest.declass() == self.en_passant);
 
-        // promotion case
-        let promotion = (ch.piece == Piece::Pawn)
-            && (ch.dest.declass() & (self.turn().other().backrank())) != SpecialBB::Empty.declass();
+                // promotion case
+                let promotion = (ch.piece == Piece::Pawn)
+                    && (ch.dest.declass() & (self.turn().other().backrank()))
+                        != SpecialBB::Empty.declass();
 
-        // can be improved
-        let en_passant_change = self.en_passant | {
-            if (ch.dest - 2) == ch.src.declass() {
-                ch.dest - 1 // TODO: OP directly on u8
-            } else if (ch.dest + 2) == ch.src.declass() {
-                ch.dest + 1
-            } else {
-                SpecialBB::Empty.declass()
-            }
-        };
-
-        if en_passant {
-            if !ch.hint_legal {
-                // TODO: add legal checking
-            }
-            // toggle ennemy pawn
-            let en_passant_target_square = match turn.other() {
-                Player::Black => (ch.dest.declass() & self.en_passant) - 1,
-                Player::White => (ch.dest.declass() & self.en_passant) + 1,
-            }
-            .into_iter()
-            .next()
-            .unwrap();
-            self.pos
-                .remove_piece(turn.other(), Piece::Pawn, en_passant_target_square);
-        } else {
-            match self.pos.get((turn.other(), ch.dest.into())) {
-                Some(cap) => {
-                    self.pos.remove_piece(turn.other(), cap, ch.dest.into());
-                }
-                None => (),
-            }
-        }
-
-        //// preparations done, now inspecting
-
-        self.en_passant ^= en_passant_change;
-        self.fifty_mv += 1;
-        self.half_move_count += 1;
-
-        self.pos
-            .move_piece(turn, ch.piece, ch.src.into(), ch.dest.into());
-        let res = if promotion {
-            if ch.hint_legal
-                || self.pos.generate_attacks(turn.other()) & self.pos[(turn, Piece::King)]
-                    == SpecialBB::Empty.declass()
-            {
-                log::info!("-- legal promotion detected");
-                self.pos.remove_piece(turn, Piece::Pawn, ch.dest.into());
-                let peek = |&p| -> R {
-                    self.pos.add_new_piece(turn, p, ch.dest.into());
-                    let r = task(&self, &ch);
-                    self.pos.remove_piece(turn, p, ch.dest.into());
-                    r
+                // can be improved
+                let en_passant_change = self.en_passant | {
+                    if (ch.dest - 2) == ch.src.declass() {
+                        ch.dest - 1 // TODO: OP directly on u8
+                    } else if (ch.dest + 2) == ch.src.declass() {
+                        ch.dest + 1
+                    } else {
+                        SpecialBB::Empty.declass()
+                    }
                 };
-                let mapped = [Piece::Queen, Piece::Bishop, Piece::Rook, Piece::Knight]
-                    .iter()
-                    .map(peek);
-                mapped.reduce(reduce)
-            } else {
-                log::info!("-- filtered out");
-                self.pos.remove_piece(turn, Piece::Pawn, ch.dest.into());
-                None
+
+                if en_passant {
+                    if !ch.hint_legal {
+                        // TODO: add legal checking
+                    }
+                    // toggle ennemy pawn
+                    let en_passant_target_square = match turn.other() {
+                        Player::Black => (ch.dest.declass() & self.en_passant) - 1,
+                        Player::White => (ch.dest.declass() & self.en_passant) + 1,
+                    }
+                    .into_iter()
+                    .next()
+                    .unwrap();
+                    self.pos
+                        .remove_piece(turn.other(), Piece::Pawn, en_passant_target_square);
+                } else {
+                    match self.pos.get((turn.other(), ch.dest.into())) {
+                        Some(cap) => {
+                            self.pos.remove_piece(turn.other(), cap, ch.dest.into());
+                        }
+                        None => (),
+                    }
+                }
+
+                let cda_old = self.castles.clone();
+
+                if ch.piece == Piece::Rook {
+                    // moving rook away
+                    if (ch.src.declass() & (turn.backrank() & File::A.bb()))
+                        != SpecialBB::Empty.declass()
+                    {
+                        self.castles.set(turn, Castle::Long, false);
+                    }
+                    if (ch.src.declass() & (turn.backrank() & File::H.bb()))
+                        != SpecialBB::Empty.declass()
+                    {
+                        self.castles.set(turn, Castle::Short, false);
+                    }
+                }
+                if ch.piece == Piece::King {
+                    // moving king away
+                    self.castles.set(turn, Castle::Short, false);
+                    self.castles.set(turn, Castle::Long, false);
+                }
+
+                // capturing other player's rook
+                if (ch.dest.declass() & (turn.other().backrank() & File::A.bb()))
+                    != SpecialBB::Empty.declass()
+                {
+                    self.castles.set(turn.other(), Castle::Long, false);
+                }
+                if (ch.dest.declass() & (turn.other().backrank() & File::H.bb()))
+                    != SpecialBB::Empty.declass()
+                {
+                    self.castles.set(turn.other(), Castle::Short, false);
+                }
+
+                //// preparations done, now inspecting
+
+                self.en_passant ^= en_passant_change;
+                self.fifty_mv += 1;
+                self.half_move_count += 1;
+
+                self.pos
+                    .move_piece(turn, ch.piece, ch.src.into(), ch.dest.into());
+                let res = if promotion {
+                    if ch.hint_legal
+                        || self.pos.generate_attacks(turn.other()) & self.pos[(turn, Piece::King)]
+                            == SpecialBB::Empty.declass()
+                    {
+                        log::info!("-- legal promotion detected");
+                        self.pos.remove_piece(turn, Piece::Pawn, ch.dest.into());
+                        let peek = |&p| -> R {
+                            self.pos.add_new_piece(turn, p, ch.dest.into());
+                            let r = task(&self, &Move::Normal(*ch));
+                            self.pos.remove_piece(turn, p, ch.dest.into());
+                            r
+                        };
+                        let mapped = [Piece::Queen, Piece::Bishop, Piece::Rook, Piece::Knight]
+                            .iter()
+                            .map(peek);
+                        mapped.reduce(reduce)
+                    } else {
+                        log::info!("-- filtered out");
+                        self.pos.remove_piece(turn, Piece::Pawn, ch.dest.into());
+                        None
+                    }
+                } else if ch.hint_legal
+                    || self.pos.generate_attacks(turn.other()) & self.pos[(turn, Piece::King)]
+                        == SpecialBB::Empty.declass()
+                {
+                    let result = Some(task(&self, &Move::Normal(*ch)));
+                    result
+                } else {
+                    None
+                };
+
+                self.pos
+                    .move_piece(turn, ch.piece, ch.dest.into(), ch.src.into());
+                self.castles = cda_old;
+                self.en_passant ^= en_passant_change;
+                self.fifty_mv -= 1; // TODO: fifty mv rule
+                self.half_move_count -= 1;
+
+                // Clean state
+                if en_passant {
+                    // toggle ennemy pawn
+                    let en_passant_target_square = match turn.other() {
+                        Player::Black => (ch.dest.declass() & self.en_passant) + 1,
+                        Player::White => (ch.dest.declass() & self.en_passant) - 1,
+                    }
+                    .into_iter()
+                    .next()
+                    .unwrap();
+
+                    self.pos
+                        .add_new_piece(turn.other(), Piece::Pawn, en_passant_target_square);
+                }
+
+                res
             }
-        } else if ch.hint_legal
-            || self.pos.generate_attacks(turn.other()) & self.pos[(turn, Piece::King)]
-                == SpecialBB::Empty.declass()
-        {
-            let result = Some(task(&self, ch));
-            result
-        } else {
-            None
-        };
+            Move::Castle(c, p) => {
+                // Castle moves are filtered before, no need to check legality
+                match (c, p) {
+                    (Castle::Short, Player::White) => {
+                        self.pos
+                            .move_piece(*p, Piece::King, Square::e1.bb(), Square::g1.bb());
+                        self.pos
+                            .move_piece(*p, Piece::Rook, Square::h1.bb(), Square::f1.bb());
+                    }
+                    (Castle::Long, Player::White) => {
+                        self.pos
+                            .move_piece(*p, Piece::King, Square::e1.bb(), Square::c1.bb());
+                        self.pos
+                            .move_piece(*p, Piece::Rook, Square::a1.bb(), Square::d1.bb());
+                    }
+                    (Castle::Short, Player::Black) => {
+                        self.pos
+                            .move_piece(*p, Piece::King, Square::e8.bb(), Square::g8.bb());
+                        self.pos
+                            .move_piece(*p, Piece::Rook, Square::h8.bb(), Square::f8.bb());
+                    }
+                    (Castle::Long, Player::Black) => {
+                        self.pos
+                            .move_piece(*p, Piece::King, Square::e8.bb(), Square::c8.bb());
+                        self.pos
+                            .move_piece(*p, Piece::Rook, Square::a8.bb(), Square::d8.bb());
+                    }
+                };
+                let cda_save = self.castles.clone();
+                // secretly hoping for compiler to optimize this (these are just bitwise ops)
+                self.castles.set(*p, Castle::Short, false);
+                self.castles.set(*p, Castle::Long, false);
 
-        self.pos
-            .move_piece(turn, ch.piece, ch.dest.into(), ch.src.into());
+                let en_passant_change = self.en_passant;
+                self.en_passant = SpecialBB::Empty.declass();
+                self.fifty_mv += 1;
+                self.half_move_count += 1;
 
-        self.en_passant ^= en_passant_change;
-        self.fifty_mv -= 1; // TODO: fifty mv rule
-        self.half_move_count -= 1;
+                let r = task(&self, &Move::Castle(*c, *p));
 
-        // Clean state
-        if en_passant {
-            // toggle ennemy pawn
-            let en_passant_target_square = match turn.other() {
-                Player::Black => (ch.dest.declass() & self.en_passant) + 1,
-                Player::White => (ch.dest.declass() & self.en_passant) - 1,
+                self.half_move_count -= 1;
+                self.fifty_mv -= 1;
+                self.en_passant = en_passant_change;
+
+                self.castles.copy_selection_player(*p, &cda_save);
+
+                match (c, p) {
+                    (Castle::Short, Player::White) => {
+                        self.pos.move_piece(
+                            Player::White,
+                            Piece::King,
+                            Square::g1.bb(),
+                            Square::e1.bb(),
+                        );
+                        self.pos.move_piece(
+                            Player::White,
+                            Piece::Rook,
+                            Square::f1.bb(),
+                            Square::h1.bb(),
+                        );
+                    }
+                    (Castle::Long, Player::White) => {
+                        self.pos.move_piece(
+                            Player::White,
+                            Piece::King,
+                            Square::c1.bb(),
+                            Square::e1.bb(),
+                        );
+                        self.pos.move_piece(
+                            Player::White,
+                            Piece::Rook,
+                            Square::d1.bb(),
+                            Square::a1.bb(),
+                        );
+                    }
+                    (Castle::Short, Player::Black) => {
+                        self.pos.move_piece(
+                            Player::Black,
+                            Piece::King,
+                            Square::g8.bb(),
+                            Square::e8.bb(),
+                        );
+                        self.pos.move_piece(
+                            Player::Black,
+                            Piece::Rook,
+                            Square::f8.bb(),
+                            Square::h8.bb(),
+                        );
+                    }
+                    (Castle::Long, Player::Black) => {
+                        self.pos.move_piece(
+                            Player::Black,
+                            Piece::King,
+                            Square::c8.bb(),
+                            Square::e8.bb(),
+                        );
+                        self.pos.move_piece(
+                            Player::Black,
+                            Piece::Rook,
+                            Square::d8.bb(),
+                            Square::a8.bb(),
+                        );
+                    }
+                };
+                Some(r)
             }
-            .into_iter()
-            .next()
-            .unwrap();
-
-            self.pos
-                .add_new_piece(turn.other(), Piece::Pawn, en_passant_target_square);
         }
-
-        res
     }
 
     // very unoptimized, should not be called when we can access the move as &mv
-    pub fn getmove(&mut self, uci: &str) -> Result<Option<SimplifiedMove>, ()> {
-        let gather_value = |x: Option<SimplifiedMove>, y| x.or(y);
+    pub fn getmove(&mut self, uci: &str) -> Result<Option<Move>, ()> {
+        let gather_value = |x: Option<Move>, y| x.or(y);
 
         let a = AugmentedPos::map_issues(
             self,
-            |_p, m: &SimplifiedMove| match format!("{m}") == uci {
+            |_p, m| match format!("{m}") == uci {
                 true => Some(*m),
                 false => None,
             },
@@ -217,7 +362,7 @@ impl Position {
 
         let a = AugmentedPos::map_issues(
             self,
-            |p, m: &SimplifiedMove| match format!("{m}") == uci {
+            |p, m| match format!("{m}") == uci {
                 true => Some(*p),
                 false => None,
             },
@@ -237,60 +382,8 @@ impl Position {
         })
     }
 
-    #[cfg(feature = "perft")]
-    pub fn perft_top<O: UciOutputStream>(&mut self, depth: usize) -> usize {
-        use crate::uci::UciResponse;
-
-        match depth {
-            0 => 1,
-            _ => {
-                let sum = AugmentedPos::map_issues(
-                    self,
-                    |pos, mbv| {
-                        let partial_sum = Self::perft_rec(pos, depth - 1, 0);
-                        O::send_response(UciResponse::Raw(
-                            format!("{}{}: {}", mbv.src, mbv.dest, partial_sum).as_str(),
-                        ))
-                        .unwrap();
-                        partial_sum
-                    },
-                    |a, b| a + b,
-                );
-
-                match sum {
-                    Some(x) => x,
-                    None => 0,
-                }
-            }
-        }
-    }
-
-    fn perft_rec(&self, depth: usize, depth_in: usize) -> usize {
-        match depth {
-            0 => 1,
-            1 => {
-                let a = AugmentedPos::map_issues(self, |_, _| 1 as usize, |a, b| a + b);
-                match a {
-                    Some(x) => x,
-                    None => 0,
-                }
-            }
-            _ => {
-                let sum = AugmentedPos::map_issues(
-                    self,
-                    |pos, _| Self::perft_rec(pos, depth - 1, depth_in + 1),
-                    |a, b| a + b,
-                );
-
-                match sum {
-                    Some(x) => x,
-                    None => 0,
-                }
-            }
-        }
-    }
-
     // extract fen, knowing it is the first element in the iterator
+    #[deprecated]
     pub fn extract_fen(words: &mut std::str::SplitWhitespace<'_>) -> Option<Self> {
         Self::parse_fen(
             words.nth(0),
@@ -471,22 +564,15 @@ mod tests {
 
     use test::Bencher;
 
-    use crate::PositionSpec;
+    use crate::{NullUciStream, Position, PositionSpec};
 
     #[cfg(feature = "perft")]
     #[bench]
-    fn perft_startpos(b: &mut Bencher) {
+    fn perft_startpos_3(b: &mut Bencher) {
         use crate::uci::NullUciStream;
-
-        let mut a = super::Position::startingpos();
-
-        assert_eq!(a.perft_top::<NullUciStream>(1), 20);
-        assert_eq!(a.perft_top::<NullUciStream>(2), 400);
-        assert_eq!(a.perft_top::<NullUciStream>(3), 8902);
-
         let mut a = super::Position::startingpos();
         b.iter(|| {
-            assert_eq!(a.perft_top::<NullUciStream>(3), 8902);
+            assert_eq!(a.perft_top::<NullUciStream>(std::hint::black_box(3)), 8902);
         });
     }
 
@@ -510,48 +596,21 @@ mod tests {
             "Hash has been altered in issue exploration phase"
         );
     }*/
-    /*
-    #[test]
-    fn captures_knight() {
-        let mut p = Position::from_fen("7k/p7/8/1N6/8/8/8/7K", "w", "-", "-", "0", "0");
-        assert_eq!(
-            AugmentedPos::list_issues(&p).map(|x| { x.iter().count() }),
-            Ok(3 + 8 - 2),
-            "{:?}",
-            log::error!("Wrong fifty mv status")
-        );
-        let x = p.getmove("b5a7").expect("Did not find capture").unwrap();
-        p.stack(&x);
-        assert_eq!(
-            p.half_move_count,
-            1,
-            "{:?}",
-            log::error!("Move count fails updating")
-        );
-        assert_eq!(p.fifty_mv, 0, "{:?}", log::error!("Wrong fifty mv status"));
-        assert_eq!(p.turn(), Player::Black, "{:?}", log::error!("Wrong turn"));
-        assert_eq!(
-            AugmentedPos::list_issues(&p).unwrap().len(),
-            3,
-            "{:?}",
-            log::error!("Wrong number of moves found")
-        );
-    }*/
-    /*
+
     #[test]
     fn captures_en_passant() {
         let mut p = Position::from_fen("7k/8/8/8/1p6/8/P7/7K", "w", "-", "-", "0", "0");
         let x = p.getmove("a2a4").unwrap().unwrap();
-        p.stack(&x);
-        assert_eq!(p.half_move_count, 1);
-        assert_eq!(p.fifty_mv, 0);
-        let x = p.getmove("b4a3").unwrap().unwrap();
-        p.stack(&x);
-        assert_eq!(p.half_move_count, 2);
-        assert_eq!(p.fifty_mv, 0);
-        assert_eq!(AugmentedPos::list_issues(&p).unwrap().len(), 3);
-    }*/
-    /*
+        //p.stack(&x);
+        //assert_eq!(p.half_move_count, 1);
+        //assert_eq!(p.fifty_mv, 0);
+        //let x = p.getmove("b4a3").unwrap().unwrap();
+        //p.stack(&x);
+        //assert_eq!(p.half_move_count, 2);
+        //assert_eq!(p.fifty_mv, 0);
+        //assert_eq!(AugmentedPos::list_issues(&p).unwrap().len(), 3);
+    }
+
     #[test]
     fn promotion() {
         let mut p = Position::from_fen("7k/P7/8/8/8/8/8/7K", "w", "-", "-", "0", "0");
@@ -561,14 +620,14 @@ mod tests {
             "Failed counting moves in promoting position."
         ); // 4 pieces possible + 3 king moves
         //p.perft_top::<UciOut<Stdout>>(1);
-        let x = p.getmove("a7a8q").unwrap().unwrap();
-        p.stack(&x);
-        assert_eq!(
-            p.perft_top::<NullUciStream>(1),
-            2,
-            "Failed promotion to queen"
-        ); // king in check
-    }*/
+        //let x = p.getmove("a7a8q").unwrap().unwrap();
+        //p.stack(&x);
+        //assert_eq!(
+        //    p.perft_top::<NullUciStream>(1),
+        //    2,
+        //    "Failed promotion to queen"
+        //); // king in check
+    }
 }
 
 #[test]

@@ -51,7 +51,7 @@ pub struct EvalState {
 
 //// Internal defs/implementations
 
-pub struct MoveList(Vec<SimplifiedMove>);
+pub struct MoveList(Vec<Move>);
 impl Default for MoveList {
     fn default() -> Self {
         MoveList { 0: Vec::new() }
@@ -172,7 +172,7 @@ impl EvalState {
     }
 
     // create the evalState for the current move, knowing that the eval is the best for player
-    pub fn nest(&mut self, m: SimplifiedMove) {
+    pub fn nest(&mut self, m: Move) {
         self.eval = self.eval.nest();
         self.pv.0.push(m);
     }

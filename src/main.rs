@@ -5,12 +5,12 @@
 #![feature(impl_trait_in_assoc_type)]
 #![feature(associated_type_defaults)]
 
-use std::cell::LazyCell;
 use std::io::Write;
 use std::time::SystemTime;
 use std::{io::Stdout, sync::LazyLock};
 
 use uci::{UciOut, UciShell};
+pub mod algorithms;
 pub mod prelude;
 use prelude::*;
 pub mod bitboard;

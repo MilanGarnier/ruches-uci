@@ -8,7 +8,7 @@ use dests::{generate_king_dests, pawn_move_up_nocap};
 use log::warn;
 
 use super::Player;
-use super::castle::{self, CASTLES_KEEP_UNCHANGED, Castle, CastleData};
+use super::castle::{self, CASTLES_KEEP_UNCHANGED, Castle, CastleData, CastleRights};
 use crate::bitboard::Bitboard;
 
 use super::Position;
@@ -22,6 +22,30 @@ mod dests;
 pub trait TransitionSet<T> {}
 // if fits in 32 bits, relevant data is used at runtime
 // to have the legacy behaviour you could collect full moves
+
+#[derive(Clone, Copy, Debug)]
+pub enum Move {
+    Normal(SimplifiedMove),
+    Castle(Castle, Player),
+}
+
+impl Display for Move {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Move::Normal(x) => write!(f, "{}", x),
+            Move::Castle(c, p) => match c {
+                Castle::Short => match p {
+                    Player::Black => write!(f, "e8g8"),
+                    Player::White => write!(f, "e1g1"),
+                },
+                Castle::Long => match p {
+                    Player::Black => write!(f, "e8c8"),
+                    Player::White => write!(f, "e1c1"),
+                },
+            },
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy)]
 pub struct SimplifiedMove {
@@ -279,86 +303,6 @@ impl Display for PartialMove {
     }
 }
 
-#[derive(Clone, Copy)]
-pub struct Move {
-    // Full move data
-    pm: PartialMove,
-    fifty_mv: u16, // either 0 if this move is eligible, or the nb of half moves before it happened
-    en_passant: Bitboard<GenericBB>,
-}
-
-impl Move {
-    pub const fn partialmove<'a>(&'a self) -> &'a PartialMove {
-        &self.pm
-    }
-    pub const fn fifty_mv(&self) -> u16 {
-        self.fifty_mv
-    }
-    pub const fn en_passant(&self) -> Bitboard<GenericBB> {
-        self.en_passant
-    }
-
-    pub fn is_capture(&self) -> bool {
-        self.pm.is_capture()
-    }
-    pub const fn is_promotion(&self) -> bool {
-        self.pm.is_promotion()
-    }
-    pub const fn is_castle(&self) -> bool {
-        self.pm.is_castle()
-    }
-    pub fn is_moved(&self, p: Piece) -> bool {
-        self.pm.is_moved(p)
-    }
-    pub fn dest(&self) -> Bitboard<Square> {
-        self.pm.dest()
-    }
-    pub fn src(&self) -> Bitboard<Square> {
-        self.pm.src()
-    }
-}
-impl Display for Move {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.pm)
-    }
-}
-
-impl Debug for Move {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let _ = write!(f, "{}", self);
-        Ok(())
-    }
-}
-
-pub struct MoveIter<'a> {
-    array: &'a [Option<Move>; 256],
-    index: usize,
-}
-impl<'a> MoveIter<'a> {
-    pub fn create(array: &'a [Option<Move>; 256]) -> Self {
-        MoveIter { array, index: 0 }
-    }
-}
-impl<'a> Iterator for MoveIter<'a> {
-    type Item = &'a Move;
-    fn next(&mut self) -> Option<Self::Item> {
-        match self.index {
-            256 => None,
-            _ => {
-                let x = &self.array[self.index];
-                match x {
-                    Some(m) => {
-                        self.index += 1;
-                        Some(m)
-                    }
-                    None => None, // stop at first "null Move"
-                                  //{ self.index += 1; self.next() }
-                }
-            }
-        }
-    }
-}
-
 // dest has to point to a single square
 fn generate_capture_data(meta: &AugmentedPos, dest: Bitboard<Square>, p: Piece) -> Option<Piece> {
     // TODO: #[cfg(debug_assertions)] - single byte
@@ -425,53 +369,57 @@ pub fn generate_castle_data(
     cd
 }
 
-// return in [0/1/2]
-pub fn generate_castle_move(meta: &AugmentedPos, c: castle::Castle) -> Option<Move> {
-    if meta.p.castles.fetch(meta.player(), c)  // right to castle
-    &&  meta.attacked[meta.opponent() as usize] & (c.files() & meta.player().backrank()) == SpecialBB::Empty.declass()  // no attacks on path (including check)
-    &&  (meta.p.pos.occupied(meta.player()) | meta.p.pos.occupied(meta.opponent())) & (c.free_files() & meta.player().backrank()) == SpecialBB::Empty.declass()
-    // no piece on rook&king path
-    {
-        // forbid current player castles
-        let mut new_cas_data = CASTLES_KEEP_UNCHANGED;
-        new_cas_data.copy_selection_player(meta.player(), &meta.p.castles);
-
-        let mv = Move {
-            pm: PartialMove::Castle(c, meta.player(), new_cas_data),
-            fifty_mv: 0,
-            en_passant: meta.p.en_passant,
-        };
-        Some(mv)
-    } else {
-        None
-    }
+fn iter_castle_moves<R>(cda: CastleData, m: &AugmentedPos) -> impl Iterator<Item = Move> {
+    let player = m.player();
+    let blockers = m.p.pos.occupied(player) | m.p.pos.occupied(player.other());
+    let attacks = m.attacked[player.other() as usize];
+    let x = [Castle::Short, Castle::Long]
+        .iter()
+        .filter_map(move |c| {
+            if cda.fetch(player, *c) {
+                Some(*c)
+            } else {
+                None
+            }
+        })
+        .filter(move |c| {
+            attacks & c.files() & player.backrank() == SpecialBB::Empty.declass()
+                && blockers & c.free_files() & player.backrank() == SpecialBB::Empty.declass()
+        });
+    let r = x.map(move |c| Move::Castle(c, player));
+    r
 }
 
 // -- prefilter legal, put pesudo legal remain
-fn filter_pseudo_legal(p: &AugmentedPos, mut m: SimplifiedMove) -> Option<SimplifiedMove> {
-    let pinned = (m.src.declass() & p.pinned) != SpecialBB::Empty.declass();
-    // if src is pinned and moves to a destination not pinned it will be illegal anyway
-    let pinned_dst = m.dest.declass() & p.pinned != SpecialBB::Empty.declass();
-    let is_check = p.is_check();
+fn filter_pseudo_legal(p: &AugmentedPos, mut m: Move) -> Option<Move> {
+    if let Move::Normal(mut m) = m {
+        let pinned = (m.src.declass() & p.pinned) != SpecialBB::Empty.declass();
+        // if src is pinned and moves to a destination not pinned it will be illegal anyway
+        let pinned_dst = m.dest.declass() & p.pinned != SpecialBB::Empty.declass();
+        let is_check = p.is_check();
 
-    let mut edge_case = false;
-    // let mut known_illegal = false;
+        let mut edge_case = false;
+        // let mut known_illegal = false;
 
-    // if moving a pinned piece out of the pinned lines
-    if pinned {
-        edge_case = true;
-    }
-
-    // in check but not moving king blocking pins nor capturing source
-    if is_check && !(m.piece == Piece::King) {
-        edge_case = true;
-        if !pinned_dst && (p.p.pos.occupied(p.turn.other()) & m.dest) == SpecialBB::Empty.declass()
-        {
-            return None;
+        // if moving a pinned piece out of the pinned lines
+        if pinned {
+            edge_case = true;
         }
+
+        // in check but not moving king blocking pins nor capturing source
+        if is_check && !(m.piece == Piece::King) {
+            edge_case = true;
+            if !pinned_dst
+                && (p.p.pos.occupied(p.turn.other()) & m.dest) == SpecialBB::Empty.declass()
+            {
+                return None;
+            }
+        }
+        m.hint_legal = !edge_case;
+        Some(Move::Normal(m))
+    } else {
+        Some(m)
     }
-    m.hint_legal = !edge_case;
-    Some(m)
 }
 
 fn generate_non_pawn_move_data_lazy<T: SquareProp>(
@@ -481,11 +429,13 @@ fn generate_non_pawn_move_data_lazy<T: SquareProp>(
     dest: Bitboard<GenericBB>,
 ) -> impl Iterator {
     dest.into_iter()
-        .map(move |sq| SimplifiedMove {
-            src: src.into(),
-            dest: sq.into(),
-            piece,
-            hint_legal: false,
+        .map(move |sq| {
+            Move::Normal(SimplifiedMove {
+                src: src.into(),
+                dest: sq.into(),
+                piece,
+                hint_legal: false,
+            })
         })
         .filter_map(|sm| filter_pseudo_legal(meta, sm))
 }
@@ -502,7 +452,7 @@ pub struct AugmentedPos<'a> {
 impl<'a> AugmentedPos<'a> {
     pub fn map_issues<R>(
         p: &Position,
-        task: impl Fn(&Position, &SimplifiedMove) -> R,
+        task: impl Fn(&Position, &Move) -> R,
         reduction: impl Fn(R, R) -> R,
     ) -> Option<R> {
         let turn = Player::from_usize((p.half_move_count % 2).into());
@@ -551,7 +501,7 @@ impl<'a> AugmentedPos<'a> {
 
     fn gen_moves_map<R>(
         &mut self,
-        task: impl Fn(&Position, &SimplifiedMove) -> R,
+        task: impl Fn(&Position, &Move) -> R,
         reduce: impl Fn(R, R) -> R,
     ) -> Option<R> {
         self.attacked[self.turn.other() as usize] = self.p.pos.generate_attacks(self.turn.other());
@@ -584,11 +534,13 @@ impl<'a> AugmentedPos<'a> {
                     .map(|src| {
                         gen_dests(p, src)
                             .into_iter()
-                            .map(|dest| SimplifiedMove {
-                                piece: p,
-                                src: src.into(),
-                                dest: dest.into(),
-                                hint_legal: false,
+                            .map(|dest| {
+                                Move::Normal(SimplifiedMove {
+                                    piece: p,
+                                    src: src.into(),
+                                    dest: dest.into(),
+                                    hint_legal: false,
+                                })
                             })
                             .filter_map(|m| filter_pseudo_legal(self, m))
                             .map(|m| {
@@ -603,7 +555,16 @@ impl<'a> AugmentedPos<'a> {
             .filter_map(|x| x)
             .reduce(&reduce);
         //TODO: add castling
-        a
+        let b = iter_castle_moves::<R>(self.p.castles, self)
+            .map(|m| Position::simplified_move_outcomes(*self.p, &m, &task, &reduce))
+            .filter_map(|x| x)
+            .reduce(&reduce);
+        match (a, b) {
+            (Some(x), Some(y)) => Some(reduce(x, y)),
+            (Some(x), None) => Some(x),
+            (None, Some(y)) => Some(y),
+            (None, None) => None,
+        }
     }
 
     fn compute_pinned(&mut self) {
