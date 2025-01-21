@@ -1,3 +1,4 @@
+#[allow(unused)]
 pub use crate::algorithms::*;
 pub use crate::bitboard::*;
 pub use crate::eval::*;

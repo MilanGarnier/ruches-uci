@@ -4,8 +4,8 @@ pub trait Parsing {
 }
 
 use castle::{CASTLES_ALL_ALLOWED, CASTLES_ALL_FORBIDDEN, Castle, CastleData};
-use movegen::SimplifiedMove;
-pub use movegen::{AtomicMove, AugmentedPos, Change, Move, PartialMove, Promotion, StandardMove};
+
+pub use movegen::{AtomicMove, AugmentedPos, Change, Move, Promotion, StandardMove};
 
 pub mod types;
 pub use types::*;
@@ -93,15 +93,18 @@ impl Position {
                         != SpecialBB::Empty.declass();
 
                 // can be improved
-                let en_passant_change = self.en_passant | {
-                    if (ch.dest - 2) == ch.src.declass() {
-                        ch.dest - 1 // TODO: OP directly on u8
-                    } else if (ch.dest + 2) == ch.src.declass() {
-                        ch.dest + 1
+                let en_passant_change = self.en_passant
+                    | if ch.piece == Piece::Pawn {
+                        if (ch.dest - 2) == ch.src.declass() {
+                            ch.dest - 1 // TODO: OP directly on u8
+                        } else if (ch.dest + 2) == ch.src.declass() {
+                            ch.dest + 1
+                        } else {
+                            SpecialBB::Empty.declass()
+                        }
                     } else {
                         SpecialBB::Empty.declass()
-                    }
-                };
+                    };
 
                 if en_passant {
                     if !ch.hint_legal {
@@ -357,11 +360,11 @@ impl Position {
             None => None,
         })
     }
-    pub fn playmove(&mut self, uci: &str) -> Result<Option<Position>, ()> {
+    pub fn playmove(self, uci: &str) -> Result<Option<Position>, ()> {
         let gather_value = |x: Option<Position>, y| x.or(y);
 
         let a = AugmentedPos::map_issues(
-            self,
+            &self,
             |p, m| match format!("{m}") == uci {
                 true => Some(*p),
                 false => None,
@@ -383,7 +386,6 @@ impl Position {
     }
 
     // extract fen, knowing it is the first element in the iterator
-    #[deprecated]
     pub fn extract_fen(words: &mut std::str::SplitWhitespace<'_>) -> Option<Self> {
         Self::parse_fen(
             words.nth(0),
@@ -599,16 +601,14 @@ mod tests {
 
     #[test]
     fn captures_en_passant() {
-        let mut p = Position::from_fen("7k/8/8/8/1p6/8/P7/7K", "w", "-", "-", "0", "0");
-        let x = p.getmove("a2a4").unwrap().unwrap();
-        //p.stack(&x);
-        //assert_eq!(p.half_move_count, 1);
-        //assert_eq!(p.fifty_mv, 0);
-        //let x = p.getmove("b4a3").unwrap().unwrap();
-        //p.stack(&x);
-        //assert_eq!(p.half_move_count, 2);
-        //assert_eq!(p.fifty_mv, 0);
-        //assert_eq!(AugmentedPos::list_issues(&p).unwrap().len(), 3);
+        let p = Position::from_fen("7k/8/8/8/1p6/8/P7/7K", "w", "-", "-", "0", "0");
+        let p = p.playmove("a2a4").unwrap().unwrap();
+        assert_eq!(p.half_move_count, 1);
+        assert_eq!(p.fifty_mv, 0);
+        let mut p = p.playmove("b4a3").unwrap().unwrap();
+        assert_eq!(p.half_move_count, 2);
+        assert_eq!(p.fifty_mv, 0);
+        assert_eq!(p.perft_top::<NullUciStream>(1), 3);
     }
 
     #[test]

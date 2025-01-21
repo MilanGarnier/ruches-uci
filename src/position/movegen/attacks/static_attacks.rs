@@ -19,6 +19,7 @@ pub struct Lookup {
 pub static STATIC_ATTACKS: LazyLock<Lookup> = LazyLock::new(|| Lookup::init());
 
 impl Lookup {
+    #[cfg(test)]
     pub fn ensure_init(&self) {
         ()
     }

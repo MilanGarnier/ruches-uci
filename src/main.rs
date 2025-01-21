@@ -5,6 +5,7 @@
 #![feature(impl_trait_in_assoc_type)]
 #![feature(associated_type_defaults)]
 
+#[cfg(debug_assertions)]
 use std::io::Write;
 use std::time::SystemTime;
 use std::{io::Stdout, sync::LazyLock};
@@ -15,6 +16,7 @@ pub mod prelude;
 use prelude::*;
 pub mod bitboard;
 pub mod eval;
+#[deprecated]
 pub mod localvec;
 pub mod piece;
 pub mod player;

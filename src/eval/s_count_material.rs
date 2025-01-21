@@ -26,6 +26,7 @@ impl BasicEvaluation for MaterialBalance {
 }
 
 impl Piece {
+    #[allow(unused)]
     fn value(self) -> usize {
         match self {
             Piece::Pawn => 100,

@@ -13,7 +13,6 @@ mod s_count_material;
 
 use std::fmt::{Display, Formatter};
 
-use movegen::SimplifiedMove;
 pub use s_count_material::MaterialBalance;
 
 use super::prelude::*;
@@ -59,8 +58,9 @@ impl Default for MoveList {
 }
 impl Display for MoveList {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "pv ")?;
         for m in &self.0 {
-            write!(f, "{m:?} ")?;
+            write!(f, "{m} ")?;
         }
         Ok(())
     }

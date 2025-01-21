@@ -1,14 +1,12 @@
 use crate::prelude::*;
 use std::fmt::{Debug, Display};
 
-use crate::localvec::FastVec;
-pub type MoveVec = FastVec<64, Move>;
 use crate::piece::Piece;
 use dests::{generate_king_dests, pawn_move_up_nocap};
 use log::warn;
 
 use super::Player;
-use super::castle::{self, CASTLES_KEEP_UNCHANGED, Castle, CastleData, CastleRights};
+use super::castle::{CASTLES_KEEP_UNCHANGED, Castle, CastleData};
 use crate::bitboard::Bitboard;
 
 use super::Position;
@@ -222,87 +220,6 @@ impl Display for StandardMove {
     }
 }
 
-#[derive(Clone, Copy)]
-pub enum PartialMove {
-    Std(StandardMove),
-    Castle(Castle, Player, CastleData),
-}
-
-impl PartialMove {
-    fn dest(&self) -> Bitboard<Square> {
-        match self {
-            PartialMove::Std(s) => s.mv.dest(),
-            PartialMove::Castle(c, p, _cd) => {
-                let dst_sq = c.king_dest_file() & p.backrank();
-                Square::from_bb(&dst_sq).unwrap()
-            }
-        }
-    }
-    fn src(&self) -> Bitboard<Square> {
-        match self {
-            PartialMove::Std(s) => s.mv.src(),
-            PartialMove::Castle(_c, p, _cd) => {
-                Bitboard(File::E) & p.backrank() //*Square::from_bb(&(Bitboard(File::E) & p.backrank())).unwrap()
-            }
-        }
-    }
-    pub fn is_capture(&self) -> bool {
-        match self {
-            PartialMove::Std(x) => x.mv.cap(),
-            _ => false,
-        }
-    }
-    pub const fn is_promotion(&self) -> bool {
-        match self {
-            PartialMove::Std(x) => match x.mv {
-                AtomicMove::PiecePromoted(_) => true,
-                _ => false,
-            },
-            _ => false,
-        }
-    }
-    pub const fn is_castle(&self) -> bool {
-        match self {
-            PartialMove::Castle(_, _, _) => true,
-            _ => false,
-        }
-    }
-    pub fn is_moved(&self, p: Piece) -> bool {
-        match p {
-            Piece::King => match self {
-                PartialMove::Castle(_, _, _) => true,
-                PartialMove::Std(x) => x.is_moved(p),
-            },
-            Piece::Rook => match self {
-                PartialMove::Castle(_, _, _) => true,
-                PartialMove::Std(x) => x.is_moved(p),
-            },
-            _ => match self {
-                PartialMove::Castle(_, _, _) => false,
-                PartialMove::Std(x) => x.is_moved(p),
-            },
-        }
-    }
-}
-
-impl Display for PartialMove {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            PartialMove::Castle(x, pl, _) => match x {
-                Castle::Short => match pl {
-                    Player::Black => writeln!(f, "e8g8"),
-                    Player::White => writeln!(f, "e1g1"),
-                },
-                Castle::Long => match pl {
-                    Player::Black => write!(f, "e8c8"),
-                    Player::White => write!(f, "e1c1"),
-                },
-            },
-            PartialMove::Std(x) => write!(f, "{x}"),
-        }
-    }
-}
-
 // dest has to point to a single square
 fn generate_capture_data(meta: &AugmentedPos, dest: Bitboard<Square>, p: Piece) -> Option<Piece> {
     // TODO: #[cfg(debug_assertions)] - single byte
@@ -391,7 +308,7 @@ fn iter_castle_moves<R>(cda: CastleData, m: &AugmentedPos) -> impl Iterator<Item
 }
 
 // -- prefilter legal, put pesudo legal remain
-fn filter_pseudo_legal(p: &AugmentedPos, mut m: Move) -> Option<Move> {
+fn filter_pseudo_legal(p: &AugmentedPos, m: Move) -> Option<Move> {
     if let Move::Normal(mut m) = m {
         let pinned = (m.src.declass() & p.pinned) != SpecialBB::Empty.declass();
         // if src is pinned and moves to a destination not pinned it will be illegal anyway
@@ -420,24 +337,6 @@ fn filter_pseudo_legal(p: &AugmentedPos, mut m: Move) -> Option<Move> {
     } else {
         Some(m)
     }
-}
-
-fn generate_non_pawn_move_data_lazy<T: SquareProp>(
-    meta: &AugmentedPos,
-    piece: Piece,
-    src: Bitboard<Square>,
-    dest: Bitboard<GenericBB>,
-) -> impl Iterator {
-    dest.into_iter()
-        .map(move |sq| {
-            Move::Normal(SimplifiedMove {
-                src: src.into(),
-                dest: sq.into(),
-                piece,
-                hint_legal: false,
-            })
-        })
-        .filter_map(|sm| filter_pseudo_legal(meta, sm))
 }
 
 // structure containing a

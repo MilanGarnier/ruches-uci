@@ -21,6 +21,7 @@ pub use dyn_attacks::{generate_bishops, generate_queens, generate_rooks};
 pub use dyn_attacks::{generate_king, generate_knights, generate_pawns};
 mod tests {
 
+    #[allow(unused)]
     use movegen::attacks::{
         dyn_attacks::{generate_bishops, generate_queens, generate_rooks},
         generate_knights, generate_pawns,

@@ -20,14 +20,12 @@ const BUILD_AUTHORS: &str = env!("CARGO_PKG_AUTHORS");
 
 pub struct UciOut<O: Write> {
     _a: PhantomData<O>,
-    debug: bool,
 }
 
 pub struct UciShell {
     // state will be locked during critical commands
     runtime: Arc<Mutex<tokio::runtime::Runtime>>,
     worker: Arc<Mutex<Option<(tokio::task::JoinHandle<()>, Sender<()>)>>>,
-    debug: bool,
     position: Arc<Mutex<Position>>, // TODO add here internal configuration
 }
 
@@ -43,7 +41,6 @@ impl UciShell {
         Self {
             runtime: Arc::new(Mutex::new(tokio::runtime::Runtime::new().unwrap())),
             worker: Arc::new(Mutex::new(None)),
-            debug: true,
             position: Arc::new(Mutex::new(Position::startingpos())),
         }
     }
@@ -111,7 +108,7 @@ pub fn parse(line: String) -> Result<ParsedCommand, ()> {
 }
 
 impl UciOutputStream for UciOut<std::io::Sink> {
-    fn send_response<T: Display>(r: T) -> Result<(), std::io::Error> {
+    fn send_response<T: Display>(_r: T) -> Result<(), std::io::Error> {
         Ok(())
     }
 
@@ -167,7 +164,8 @@ pub enum GoCommand {
     Perft(usize),
     Infinite,
 }
-enum UciOption {
+#[allow(unused)]
+pub enum UciOption {
     String {
         default: String,
     },
@@ -251,7 +249,7 @@ impl UciShell {
             match res.unwrap() {
                 CommandResult::Finished(true) => return,
                 CommandResult::Finished(false) => (),
-                CommandResult::Pending(h) => {}
+                CommandResult::Pending(_h) => {}
             }
         }
     }
@@ -359,6 +357,7 @@ impl UciShell {
                     Out::send_response(UciResponse::Raw(
                         format!("Nodes searched: {}", c).as_str(),
                     ))?;
+                    Out::send_response(UciResponse::Raw(""))?;
                 }
                 GoCommand::Infinite => {
                     let (sendstop, sigstop) = channel();
@@ -372,7 +371,6 @@ impl UciShell {
                     self.try_register(t, sendstop).unwrap();
                 }
             },
-            _ => panic!("Should not be able to be here"),
         };
         return Ok(CommandResult::Finished(false));
     }

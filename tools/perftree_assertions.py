@@ -40,24 +40,28 @@ def run_perft(command, pos, depth):
         stderr=subprocess.PIPE,
         text=True,
         bufsize=1,
+        universal_newlines=True,
     )
 
     # Start a thread to read stdout incrementally
     stdout_thread = threading.Thread(target=read_stdout, args=(process.stdout,))
     stdout_thread.daemon = True
     stdout_thread.start()
+
     # Send input after a delay (simulate late input)
-    process.stdin.write("{}\n".format(pos))
-    process.stdin.flush()
+    if process.stdin:
+        process.stdin.write("{}\n".format(pos))
+        process.stdin.flush()
 
     time.sleep(0.25)  # leave time to load data before benchmarking
 
     t = time.time()
 
-    process.stdin.write("go perft {}\n".format(depth))
-    process.stdin.flush()
-    process.stdin.write("quit\n")
-    process.stdin.flush()
+    if process.stdin:
+        process.stdin.write("go perft {}\n".format(depth))
+        process.stdin.flush()
+        process.stdin.write("quit\n")
+        process.stdin.flush()
 
     # Wait for the process to complete
     process.wait()
@@ -74,7 +78,7 @@ def run_perft(command, pos, depth):
 
 import numpy
 
-x = [0] * 2
+x = [0.0] * 2
 
 for i in range(len(positions)):
     p = positions[i]

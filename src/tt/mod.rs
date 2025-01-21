@@ -1,8 +1,5 @@
+use crate::prelude::*;
 use std::{fmt::Debug, marker::PhantomData, mem::MaybeUninit, ops::Index};
-
-use crate::PositionSpec;
-
-use super::position::Position;
 
 // TODO: move in specialized perft submodule
 pub type PerftCache = Cache<PerftInfo, usize, Position>;
@@ -198,7 +195,7 @@ fn transposition_tables() {
     let mut t = PerftCache::new(16);
 
     // verify starting pos is not in table
-    let r = match t[&Position::startingpos()] {
+    let r = match t[&PositionSpec::startingpos()] {
         None => true,
         _ => false,
     };
@@ -206,13 +203,13 @@ fn transposition_tables() {
         r, true,
         "Starting pos is already in an empty Cache (shouldnt)"
     );
-    t.push(&Position::startingpos(), &PerftInfo {
+    t.push(&PositionSpec::startingpos(), &PerftInfo {
         nodes: 20,
         depth: 1,
     });
 
     assert_eq!(
-        t[&Position::startingpos()].unwrap(),
+        t[&PositionSpec::startingpos()].unwrap(),
         PerftInfo {
             nodes: 20,
             depth: 1

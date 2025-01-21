@@ -27,6 +27,8 @@ impl Hashable<usize> for Position {
 
 type ZobristSeed = [[[usize; Player::COUNT]; Piece::COUNT]; Square::COUNT];
 
+#[deprecated]
+#[allow(unused)]
 pub fn zobrist_hash_bitboard(bb: Bitboard<GenericBB>, pc: Piece, pl: Player) -> usize {
     let mut hash = 0;
     for sq in bb {
@@ -39,6 +41,8 @@ pub fn zobrist_hash_square(bb: Bitboard<Square>, pc: Piece, pl: Player) -> usize
     ZOBRIST_SEED[bb.to_index() as usize][pc as usize][pl as usize]
 }
 
+#[deprecated]
+#[allow(unused)]
 pub fn random_zobrist_seed() -> ZobristSeed {
     let mut z: ZobristSeed = [[[0; Player::COUNT]; Piece::COUNT]; Square::COUNT];
     for i in 0..Square::COUNT {

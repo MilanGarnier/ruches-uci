@@ -24,7 +24,6 @@ use std::{fmt::Debug, mem::MaybeUninit, ops::Index};
 // When computing attacks, stores them in a buffer so that they can be exploited later during move generation
 
 // this buffer is used to save data
-#[deprecated]
 pub struct FastVec<const N: usize, EntryType: Copy> {
     // max th maximum, could go lower ? not sure -> or use heap if more than 8 of them for instance
     stack: MaybeUninit<[MaybeUninit<EntryType>; N]>,

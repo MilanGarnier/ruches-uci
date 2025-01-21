@@ -1,3 +1,4 @@
+// A minimax MVP single threaded implementation
 pub struct MiniMaxMVP {}
 impl Search for MiniMaxMVP {
     async fn infinite<T: BasicEvaluation, Out: UciOutputStream>(
@@ -30,7 +31,6 @@ use log::warn;
 use crate::{
     AugmentedPos, PositionSpec,
     eval::{ApproxEval, BasicEvaluation, Eval, EvalState},
-    movegen::SimplifiedMove,
     position::Position,
     uci::{UciOutputStream, UciResponse},
 };
